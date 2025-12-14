@@ -1,0 +1,89 @@
+# ToVPN 配置文件
+# VPN 客户端配置项
+
+[vpn]
+# 默认连接模式: "tun" 或 "socks"
+default_mode = "socks"
+
+# TUN 模式配置
+[vpn.tun]
+# MTU 值 (推荐 1280-1500)
+mtu = 1280
+# TUN 栈类型: "gvisor" 或 "system"
+stack = "gvisor"
+# TUN 设备 IPv4 地址
+ipv4_address = "172.19.0.1/30"
+# 是否启用自动路由
+auto_route = true
+# 是否启用严格路由
+strict_route = false
+
+# SOCKS 代理配置
+[vpn.socks]
+# 本地监听端口
+port = 1080
+# 监听地址
+listen = "127.0.0.1"
+
+# DNS 配置
+[dns]
+# 默认 DNS 模式: "cloudflare", "google", "aliyun"
+default_mode = "google"
+
+# DNS 服务器地址
+[dns.servers]
+cloudflare = "https://1.1.1.1/dns-query"
+cloudflare_alt = "https://1.0.0.1/dns-query"
+google = "https://8.8.8.8/dns-query"
+google_alt = "https://8.8.4.4/dns-query"
+aliyun = "223.5.5.5"
+aliyun_alt = "223.6.6.6"
+
+# Hysteria2 协议配置
+[hysteria2]
+# 上行带宽 (Mbps)
+up_mbps = 100
+# 下行带宽 (Mbps)
+down_mbps = 100
+# TLS ALPN
+alpn = ["h3"]
+# 是否跳过证书验证 (生产环境建议设为 false)
+insecure = true
+
+# sing-box 配置
+[singbox]
+# API 端口
+api_port = 9090
+# 日志级别: "trace", "debug", "info", "warn", "error"
+log_level = "info"
+# PID 文件路径
+pid_file = "/tmp/tovpn-singbox.pid"
+# TUN 模式日志文件
+tun_log_file = "/tmp/tovpn-tun.log"
+
+# 连接配置
+[connection]
+# 连接超时 (秒)
+timeout = 30
+# 启动等待时间 (毫秒)
+startup_wait = 10000
+# 检查间隔 (毫秒)
+check_interval = 500
+
+# 监控配置
+[monitor]
+# 监控间隔 (毫秒)
+interval = 1000
+# 延迟测量间隔 (秒)
+latency_interval = 5
+
+# 自动重连配置
+[reconnect]
+# 是否启用自动重连
+enabled = false
+# 最大重试次数
+max_attempts = 5
+# 基础延迟 (毫秒)
+base_delay = 1000
+# 最大延迟 (毫秒)
+max_delay = 30000

@@ -1,0 +1,58 @@
+{
+  "client": {
+    "privateKey": "8KhqVpaQ+hdUqP6deAz/NSZfXtp30xqdakECeYR70EI=",
+    "address": "10.66.66.2/32"
+  },
+  "servers": [
+    {
+      "id": "us-ny",
+      "country": "United States",
+      "city": "New York",
+      "flag": "🇺🇸",
+      "endpoint": "47.88.55.204:51820",
+      "publicKey": "jbjrwioxyN9k7KoQCpO3Y9me3Sg5SXRU9fvuIelF6gM=",
+      "allowedIPs": "0.0.0.0/0",
+      "persistentKeepalive": 25
+    },
+    {
+      "id": "jp-tokyo",
+      "country": "Japan",
+      "city": "Tokyo",
+      "flag": "🇯🇵",
+      "endpoint": "103.123.45.67:51820",
+      "publicKey": "abcdefghijklmnopqrstuvwxyz1234567890ABCDEFG=",
+      "allowedIPs": "0.0.0.0/0",
+      "persistentKeepalive": 25
+    },
+    {
+      "id": "sg",
+      "country": "Singapore",
+      "city": "Singapore",
+      "flag": "🇸🇬",
+      "endpoint": "203.45.67.89:51820",
+      "publicKey": "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890abcdefg=",
+      "allowedIPs": "0.0.0.0/0",
+      "persistentKeepalive": 25
+    },
+    {
+      "id": "hk",
+      "country": "Hong Kong",
+      "city": "Hong Kong",
+      "flag": "🇭🇰",
+      "endpoint": "45.67.89.123:51820",
+      "publicKey": "HongKongServerPublicKeyHere1234567890ABCDEFG=",
+      "allowedIPs": "0.0.0.0/0",
+      "persistentKeepalive": 25
+    },
+    {
+      "id": "de-frankfurt",
+      "country": "Germany",
+      "city": "Frankfurt",
+      "flag": "🇩🇪",
+      "endpoint": "89.123.45.67:51820",
+      "publicKey": "GermanyFrankfurtPublicKey1234567890ABCDEFGHI=",
+      "allowedIPs": "0.0.0.0/0",
+      "persistentKeepalive": 25
+    }
+  ]
+}

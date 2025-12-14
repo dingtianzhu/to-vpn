@@ -1,0 +1,106 @@
+/**
+ * CSS 变量定义
+ * 统一管理所有颜色、间距、阴影等设计变量
+ */
+
+:root {
+  /* ========== 核心品牌色 ========== */
+  --vpn-primary: #10b981;
+  /* 主色调 - Emerald 500 */
+  --vpn-primary-hover: #059669;
+  /* 主色调悬停 - Emerald 600 */
+  --vpn-primary-light: #34d399;
+  /* 主色调浅色 - Emerald 400 */
+  --vpn-primary-dark: #047857;
+  /* 主色调深色 - Emerald 700 */
+
+  --vpn-danger: #ef4444;
+  /* 危险/错误色 - Red 500 */
+  --vpn-danger-hover: #dc2626;
+  /* 危险色悬停 - Red 600 */
+
+  --vpn-warning: #f59e0b;
+  /* 警告色 - Amber 500 */
+  --vpn-warning-hover: #d97706;
+  /* 警告色悬停 - Amber 600 */
+
+  --vpn-info: #3b82f6;
+  /* 信息色 - Blue 500 */
+  --vpn-success: #22c55e;
+  /* 成功色 - Green 500 */
+
+  /* ========== 浅色主题 (macOS 风格) ========== */
+  --vpn-bg: #f5f5f7;
+  /* 应用背景 */
+  --vpn-sidebar-bg: rgba(245, 245, 247, 0.85);
+  /* 侧边栏背景 (半透明) */
+  --vpn-panel: rgba(255, 255, 255, 0.6);
+  /* 面板背景 (半透明) */
+  --vpn-card: #ffffff;
+  /* 卡片背景 */
+  --vpn-card-hover: #fafafa;
+  /* 卡片悬停背景 */
+
+  --vpn-text: #1d1d1f;
+  /* 主要文字 */
+  --vpn-text-secondary: #86868b;
+  /* 次要文字 */
+  --vpn-muted: #a1a1a6;
+  /* 提示/禁用文字 */
+
+  --vpn-border: rgba(0, 0, 0, 0.08);
+  /* 边框颜色 */
+  --vpn-border-hover: rgba(0, 0, 0, 0.12);
+  /* 边框悬停颜色 */
+
+  --vpn-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  /* 阴影 */
+  --vpn-shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.08);
+  /* 大阴影 */
+
+  --vpn-input-bg: rgba(0, 0, 0, 0.05);
+  /* 输入框背景 */
+  --vpn-input-focus: rgba(16, 185, 129, 0.1);
+  /* 输入框聚焦背景 */
+
+  /* ========== 间距变量 ========== */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+
+  /* ========== 圆角变量 ========== */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  /* ========== 过渡时间 ========== */
+  --transition-fast: 0.15s;
+  --transition-normal: 0.2s;
+  --transition-slow: 0.3s;
+}
+
+/* ========== 深色主题 ========== */
+.dark {
+  --vpn-bg: #1e1e1e;
+  --vpn-sidebar-bg: rgba(30, 30, 30, 0.85);
+  --vpn-panel: rgba(45, 45, 45, 0.6);
+  --vpn-card: #2c2c2e;
+  --vpn-card-hover: #3a3a3c;
+
+  --vpn-text: #f5f5f7;
+  --vpn-text-secondary: #98989d;
+  --vpn-muted: #6e6e73;
+
+  --vpn-border: rgba(255, 255, 255, 0.1);
+  --vpn-border-hover: rgba(255, 255, 255, 0.15);
+
+  --vpn-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+  --vpn-shadow-lg: 0 4px 24px rgba(0, 0, 0, 0.3);
+
+  --vpn-input-bg: rgba(255, 255, 255, 0.1);
+  --vpn-input-focus: rgba(16, 185, 129, 0.15);
+}
