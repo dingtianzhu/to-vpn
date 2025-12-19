@@ -1,5 +1,8 @@
+//! VPN 状态管理模块
+
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+
 use serde::Serialize;
 use tauri_plugin_shell::process::CommandChild;
 
@@ -28,6 +31,7 @@ pub struct VpnStatusResult {
     pub status: String,
     pub server_id: Option<i32>,
     pub connected_at: Option<u64>,
+    pub mode: String,
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -49,8 +53,14 @@ pub struct VpnState {
     pub server_id: Mutex<Option<i32>>,
     pub connected_at: AtomicU64,
     pub current_mode: Mutex<String>,
+
+    /// 仅用于 traffic/latency monitor 线程
     pub monitor_running: Arc<AtomicBool>,
-    /// 用户主动断开标志（使用 Arc 以便在线程间共享）
+
+    /// 仅用于进程看门狗 watchdog 线程（与 monitor 解耦）
+    pub watchdog_running: Arc<AtomicBool>,
+
+    /// 用户主动断开标志（用于避免“正常断开”被当成崩溃）
     pub user_disconnect: Arc<AtomicBool>,
 }
 
@@ -69,12 +79,16 @@ impl VpnState {
             connected_at: AtomicU64::new(0),
             current_mode: Mutex::new(String::new()),
             monitor_running: Arc::new(AtomicBool::new(false)),
+            watchdog_running: Arc::new(AtomicBool::new(false)),
             user_disconnect: Arc::new(AtomicBool::new(false)),
         }
     }
 
     pub fn get_status(&self) -> VpnStatusEnum {
-        self.status.lock().map(|s| *s).unwrap_or(VpnStatusEnum::Disconnected)
+        self.status
+            .lock()
+            .map(|s| *s)
+            .unwrap_or(VpnStatusEnum::Disconnected)
     }
 
     pub fn set_status(&self, new_status: VpnStatusEnum) {
@@ -83,14 +97,8 @@ impl VpnState {
         }
     }
 
-    #[allow(dead_code)]
     pub fn is_connected(&self) -> bool {
         self.get_status() == VpnStatusEnum::Connected
-    }
-
-    #[allow(dead_code)]
-    pub fn is_connecting(&self) -> bool {
-        self.get_status() == VpnStatusEnum::Connecting
     }
 
     pub fn get_connected_at(&self) -> u64 {
@@ -101,84 +109,77 @@ impl VpnState {
         self.connected_at.store(timestamp, Ordering::SeqCst);
     }
 
-    #[allow(dead_code)]
-    pub fn is_monitor_running(&self) -> bool {
-        self.monitor_running.load(Ordering::SeqCst)
-    }
-
-    #[allow(dead_code)]
-    pub fn set_monitor_running(&self, running: bool) {
-        self.monitor_running.store(running, Ordering::SeqCst);
-    }
-
-    #[allow(dead_code)]
-    pub fn is_user_disconnect(&self) -> bool {
-        self.user_disconnect.load(Ordering::SeqCst)
-    }
-
     pub fn set_user_disconnect(&self, value: bool) {
         self.user_disconnect.store(value, Ordering::SeqCst);
     }
 
-    /// 获取用户断开标志的 Arc 克隆（用于传递给其他线程）
     pub fn get_user_disconnect_flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.user_disconnect)
     }
 
     pub fn reset(&self) {
         self.set_status(VpnStatusEnum::Disconnected);
+
         if let Ok(mut server_id) = self.server_id.lock() {
             *server_id = None;
         }
+
         self.connected_at.store(0, Ordering::SeqCst);
+
         if let Ok(mut mode) = self.current_mode.lock() {
             *mode = String::new();
         }
+
+        // 注意：不要在这里重置 user_disconnect。
+        // SOCKS 模式后台日志线程用它来判断 Terminated 是否为用户主动断开。
         self.monitor_running.store(false, Ordering::SeqCst);
-        // 不重置 user_disconnect
+        self.watchdog_running.store(false, Ordering::SeqCst);
     }
 
     pub fn get_status_result(&self) -> VpnStatusResult {
         let status = self.get_status();
         let server_id = self.server_id.lock().ok().and_then(|s| *s);
+
         let connected_at = if status == VpnStatusEnum::Connected {
             Some(self.get_connected_at())
         } else {
             None
         };
 
+        let mode = self.get_current_mode();
+
         VpnStatusResult {
             status: status.as_str().to_string(),
             server_id,
             connected_at,
+            mode,
         }
     }
 
-    /// 获取当前连接模式
     pub fn get_current_mode(&self) -> String {
-        self.current_mode.lock().ok().map(|m| m.clone()).unwrap_or_default()
+        self.current_mode
+            .lock()
+            .ok()
+            .map(|m| m.clone())
+            .unwrap_or_default()
     }
 
-    /// 设置当前连接模式
     pub fn set_current_mode(&self, mode: &str) {
         if let Ok(mut current_mode) = self.current_mode.lock() {
             *current_mode = mode.to_string();
         }
     }
 
-    /// 设置服务器 ID
     pub fn set_server_id(&self, id: Option<i32>) {
         if let Ok(mut server_id) = self.server_id.lock() {
             *server_id = id;
         }
     }
 
-    /// 获取子进程
     pub fn take_child(&self) -> Option<CommandChild> {
         self.child.lock().ok().and_then(|mut c| c.take())
     }
 
-    /// 设置子进程
     pub fn set_child(&self, child: CommandChild) {
         if let Ok(mut c) = self.child.lock() {
             *c = Some(child);

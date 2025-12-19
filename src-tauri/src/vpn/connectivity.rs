@@ -26,17 +26,25 @@ pub async fn test_connectivity(use_proxy: bool) -> ConnectivityResult {
     info!(use_proxy = use_proxy, "Testing connectivity");
 
     let client_result = if use_proxy {
-        // SOCKS 模式：通过 SOCKS 代理测试
+        let proxy = match reqwest::Proxy::all(format!("socks5://127.0.0.1:{}", DEFAULT_SOCKS_PORT))
+        {
+            Ok(p) => p,
+            Err(e) => {
+                return ConnectivityResult {
+                    success: false,
+                    latency_ms: None,
+                    error: Some(format!("Invalid proxy config: {}", e)),
+                    test_url: test_url.to_string(),
+                };
+            }
+        };
+
         reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
-            .proxy(
-                reqwest::Proxy::all(format!("socks5://127.0.0.1:{}", DEFAULT_SOCKS_PORT))
-                    .unwrap_or_else(|_| reqwest::Proxy::http("http://127.0.0.1:1080").unwrap()),
-            )
+            .proxy(proxy)
             .build()
     } else {
-        // TUN 模式：直接测试，流量会自动通过 TUN 接口
-        // 不使用 no_proxy()，让系统路由决定流量走向
+        // TUN 模式：直接测试，让系统路由决定流量走向
         reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
@@ -114,11 +122,7 @@ pub async fn test_dns_resolution(domain: String) -> ConnectivityResult {
                     test_url: domain,
                 }
             } else {
-                info!(
-                    latency_ms = latency,
-                    count = addrs.len(),
-                    "DNS resolution succeeded"
-                );
+                info!(latency_ms = latency, count = addrs.len(), "DNS resolution succeeded");
                 ConnectivityResult {
                     success: true,
                     latency_ms: Some(latency),

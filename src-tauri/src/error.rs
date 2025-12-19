@@ -27,6 +27,12 @@ pub enum VpnError {
 
     #[error("IO error: {0}")]
     Io(String),
+
+    #[error("DNS leak detected: {0}")]
+    DnsLeak(String),
+
+    #[error("OAuth callback failed: {0}")]
+    OAuthCallback(String),
 }
 
 impl From<std::io::Error> for VpnError {
@@ -44,16 +50,18 @@ impl From<reqwest::Error> for VpnError {
 pub type Result<T> = std::result::Result<T, VpnError>;
 
 impl VpnError {
-    /// 将 VpnError 转换为用户友好的错误消息
+    /// 用户友好的错误提示
     pub fn user_message(&self) -> String {
         match self {
-            VpnError::Config(msg) => format!("Configuration error: {}", msg),
-            VpnError::Connection(msg) => format!("Connection failed: {}", msg),
-            VpnError::AlreadyConnected => "Already connected".to_string(),
-            VpnError::AlreadyConnecting => "Connection in progress".to_string(),
-            VpnError::InvalidServer(msg) => format!("Invalid server: {}", msg),
-            VpnError::Network(msg) => format!("Network error: {}", msg),
-            VpnError::Io(msg) => format!("IO error: {}", msg),
+            VpnError::Config(_) => "配置错误 / Configuration Error".to_string(),
+            VpnError::Connection(_) => "连接失败 / Connection Failed".to_string(),
+            VpnError::AlreadyConnected => "已连接 / Already Connected".to_string(),
+            VpnError::AlreadyConnecting => "正在连接中 / Connection in Progress".to_string(),
+            VpnError::InvalidServer(_) => "无效的服务器配置 / Invalid Server".to_string(),
+            VpnError::Network(_) => "网络错误 / Network Error".to_string(),
+            VpnError::Io(_) => "系统内部错误 / System Error".to_string(),
+            VpnError::DnsLeak(_) => "DNS泄漏 / DNS Leak Detected".to_string(),
+            VpnError::OAuthCallback(_) => "认证回调失败 / OAuth Failed".to_string(),
         }
     }
 }
