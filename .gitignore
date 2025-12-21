@@ -59,7 +59,7 @@ src-tauri/.tauri/
 # src-tauri/icons/*.ico
 
 # Tauri Dev / Release artifacts
-src-tauri/binaries/
+# src-tauri/binaries/
 src-tauri/*.log
 
 ############################
