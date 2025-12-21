@@ -55,8 +55,8 @@ vite.config.*.timestamp-*
 src-tauri/target/
 src-tauri/gen/
 src-tauri/.tauri/
-src-tauri/icons/*.png
-src-tauri/icons/*.ico
+# src-tauri/icons/*.png
+# src-tauri/icons/*.ico
 
 # Tauri Dev / Release artifacts
 src-tauri/binaries/
