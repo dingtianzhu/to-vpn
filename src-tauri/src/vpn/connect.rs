@@ -1,5 +1,5 @@
 //! VPN 连接核心模块
-//! 版本：v2025-12-17-PortSeparation-Clean
+//! 版本：v2025-12-22-Final
 
 use std::fs;
 use std::net::TcpStream;
@@ -12,7 +12,7 @@ use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 use tracing::{error, info, warn};
 
-use crate::constants;
+use crate::constants::{self, get_cache_dir};
 use crate::error::{Result, VpnError};
 
 use super::config::ConnectConfig;
@@ -21,7 +21,6 @@ use super::monitor::{
     stop_watchdog,
 };
 use super::platform;
-use super::proxy::set_system_socks_proxy;
 use super::security;
 use super::singbox::{is_fatal_error, parse_log_level};
 use super::state::{VpnState, VpnStatusEnum};
@@ -149,13 +148,13 @@ pub async fn disconnect_vpn(
     Ok("Disconnected".into())
 }
 
-// [修改] 将 app_handle 改为 _app_handle，避免未使用警告
 fn fast_cleanup_before_connect(_app_handle: &AppHandle, state: &VpnState) {
     info!("=== Cleanup before connect ===");
 
     stop_watchdog(state);
     stop_monitor(state);
-    set_system_socks_proxy(false);
+    
+    platform::set_system_socks_proxy(false);
     platform::force_cleanup();
     state.reset();
 
@@ -176,7 +175,8 @@ fn fast_cleanup_connection(app_handle: &AppHandle, state: &VpnState, is_user_act
 
     stop_watchdog(state);
     stop_monitor(state);
-    set_system_socks_proxy(false);
+    
+    platform::set_system_socks_proxy(false);
 
     let mode = state.get_current_mode();
 
@@ -279,17 +279,6 @@ async fn do_connect(
     };
     let cache_path = app_dir.join(cache_filename);
 
-    let bind_interface = if config.mode == "tun" {
-        platform::detect_default_interface()
-    } else {
-        None
-    };
-
-    info!(
-        "Generating config - mode: {}, interface detected: {:?}",
-        config.mode, bind_interface
-    );
-
     let config_content = super::singbox::generate_config(config, &cache_path)?;
 
     let config_json = serde_json::to_string_pretty(&config_content)
@@ -323,10 +312,15 @@ async fn do_connect(
     if config.mode == "tun" {
         info!("Starting TUN mode...");
 
-        set_system_socks_proxy(false);
+        platform::set_system_socks_proxy(false);
         state.set_current_mode("tun");
 
-        platform::run_singbox_tun_as_root(&config_path_str, "/tmp/tovpn-tun.log")
+        let log_path = get_cache_dir()
+            .join("tovpn-tun.log")
+            .to_string_lossy()
+            .to_string();
+
+        platform::run_singbox_tun_as_root(&config_path_str, &log_path)
             .map_err(VpnError::Connection)?;
 
         return Ok(());
@@ -334,8 +328,6 @@ async fn do_connect(
 
     // === SOCKS 模式 ===
     info!("Starting SOCKS mode...");
-    // 端口分离后，不再需要等待 API 端口 9090
-
     state.set_current_mode("socks");
 
     let sidecar = app_handle
@@ -365,7 +357,7 @@ async fn do_connect(
         warn!("SOCKS proxy verification failed, but process seems running");
     }
 
-    set_system_socks_proxy(true);
+    platform::set_system_socks_proxy(true);
 
     let user_disconnect = state.get_user_disconnect_flag();
     let app = app_handle.clone();
@@ -378,9 +370,7 @@ async fn do_connect(
                 CommandEvent::Stdout(bytes) | CommandEvent::Stderr(bytes) => {
                     let line = String::from_utf8_lossy(&bytes);
                     let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
+                    if trimmed.is_empty() { continue; }
                     let (level, msg) = parse_log_level(trimmed);
                     if !msg.is_empty() && level != "debug" {
                         emit_log(&app, level, &msg);

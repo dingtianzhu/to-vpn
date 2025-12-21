@@ -3,7 +3,7 @@ import { secureGet, secureSet, SECURE_KEYS } from "./secureStorage";
 
 // 使用环境变量
 const baseURL =
-  import.meta.env.VITE_API_BASE_URL || "http://www.dalenvpn.xyz:8080/api/v1";
+  import.meta.env.VITE_API_BASE_URL || "http://182.92.114.35:8080/api/v1";
 
 const service = axios.create({
   baseURL,

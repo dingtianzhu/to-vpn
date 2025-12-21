@@ -23,13 +23,5 @@ pub struct TunPrecheck {
     pub will_prompt: bool,
 }
 
-/// 获取当前平台名称
-#[allow(dead_code)]
-pub fn current_platform() -> &'static str {
-    #[cfg(target_os = "macos")]
-    { "macos" }
-    #[cfg(target_os = "linux")]
-    { "linux" }
-    #[cfg(target_os = "windows")]
-    { "windows" }
-}
+// 确保在所有平台的实现文件中都定义并导出了此函数
+// 在 macos.rs, windows.rs, linux.rs 中应已定义

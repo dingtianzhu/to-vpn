@@ -45,17 +45,32 @@ pub fn run() {
             tray::minimize_to_tray,
         ])
         .setup(|app| {
+            // 初始化托盘
             let _ = tray::create_tray(app.handle());
             Ok(())
         })
+        // ▼▼▼ 修改了这里：窗口事件监听 ▼▼▼
         .on_window_event(|window, event| match event {
+            // 1. 拦截主窗口的关闭请求 (点击 X)
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                if window.label() == "main" {
+                    // 阻止默认的退出程序行为
+                    api.prevent_close();
+                    // 调用 tray 模块的逻辑：隐藏窗口 + (macOS)隐藏 Dock 图标
+                    tray::minimize_to_tray(window.app_handle().clone());
+                }
+            }
+            // 2. 托盘弹窗失去焦点时自动隐藏
             tauri::WindowEvent::Focused(false) => {
                 if window.label() == "tray_popup" {
-                    let _ = window.hide();
+                    // 调用 tray 模块的 hide 方法，确保状态(IS_PINNED)被正确重置
+                    // 这样可以避免"下次点击需要点两次"的问题
+                    tray::hide_tray_popup(window.app_handle().clone());
                 }
             }
             _ => {}
         })
+        // ▲▲▲ 修改结束 ▲▲▲
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {

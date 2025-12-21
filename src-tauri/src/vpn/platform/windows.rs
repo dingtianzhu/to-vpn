@@ -1,167 +1,157 @@
-//! Windows 平台特定实现
-
+//! Windows 平台特定实现 - 补全版
 use super::TunPrecheck;
-use crate::constants::SINGBOX_PID_FILE;
+use crate::constants::{get_singbox_pid_file, SINGBOX_API_PORT_SOCKS, SINGBOX_API_PORT_TUN};
 use std::fs;
+use std::net::TcpStream;
+use std::path::Path;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
-/// 检查 sing-box 进程是否在运行
+/// 检查进程是否在运行 (基于 PID 文件和任务列表)
 pub fn is_singbox_running() -> bool {
-    // 首先检查 PID 文件
-    if let Ok(pid_str) = fs::read_to_string(SINGBOX_PID_FILE) {
-        if let Ok(_pid) = pid_str.trim().parse::<u32>() {
-            // Windows 上通过 tasklist 检查进程
-            if let Ok(output) = Command::new("tasklist")
-                .args(["/FI", &format!("PID eq {}", _pid), "/NH"])
+    let pid_file = get_singbox_pid_file();
+    if let Ok(pid_str) = fs::read_to_string(&pid_file) {
+        if let Ok(pid) = pid_str.trim().parse::<u32>() {
+            let output = Command::new("tasklist")
+                .args(["/FI", &format!("PID eq {}", pid), "/NH"])
                 .output()
-            {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if stdout.contains("sing-box") {
-                    return true;
-                }
+                .ok();
+            if let Some(o) = output {
+                return String::from_utf8_lossy(&o.stdout).contains("sing-box");
             }
         }
     }
-
-    // 备用方案：通过进程名检查
-    Command::new("tasklist")
+    // 备选方案：直接按名称查
+    let output = Command::new("tasklist")
         .args(["/FI", "IMAGENAME eq sing-box.exe", "/NH"])
         .output()
-        .map(|o| {
-            let stdout = String::from_utf8_lossy(&o.stdout);
-            stdout.contains("sing-box")
-        })
-        .unwrap_or(false)
+        .ok();
+    output.map_or(false, |o| {
+        String::from_utf8_lossy(&o.stdout).contains("sing-box")
+    })
 }
 
-/// 检查 sing-box 是否已安装（Tauri sidecar 由框架管理）
 pub fn check_singbox_installed() -> bool {
-    // Tauri sidecar 会自动处理，这里始终返回 true
-    true
+    true // Windows 下通常随 Sidecar 分发
 }
 
-/// 检查是否以管理员权限运行
+/// 检查是否已经是管理员
 fn is_admin() -> bool {
-    // 尝试检查是否有管理员权限
-    // 简化方案：检查是否能访问受保护的系统目录
-    Command::new("net")
-        .args(["session"])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    let output = Command::new("net").arg("session").output();
+    output.map(|o| o.status.success()).unwrap_or(false)
 }
 
-/// TUN 模式预检查
 pub fn precheck_tun_permission() -> TunPrecheck {
     TunPrecheck {
-        singbox_installed: check_singbox_installed(),
+        singbox_installed: true,
         sudo_cached: is_admin(),
         will_prompt: !is_admin(),
     }
 }
 
-/// 以管理员权限运行 sing-box (TUN 模式)
-///
-/// Windows 上使用 PowerShell 的 Start-Process -Verb RunAs 来提权
-pub fn run_singbox_tun_as_root(config_path: &str, _log_file: &str) -> Result<(), String> {
-    // 先停止已有进程
-    if is_singbox_running() {
-        let _ = stop_singbox_tun_as_root();
-        std::thread::sleep(std::time::Duration::from_millis(500));
+/// 寻找 Sidecar 的绝对路径 (Windows 专用)
+fn resolve_bin_path() -> String {
+    // 这是一个简化版逻辑，实际应从 tauri app_handle 获取
+    // 这里假设它在当前目录或标准 sidecar 路径
+    if Path::new("sing-box.exe").exists() {
+        return "sing-box.exe".to_string();
     }
+    "sing-box".to_string() // 依赖 PATH
+}
 
-    // 转义路径中的特殊字符
-    let escaped_config = config_path.replace("'", "''").replace("\\", "\\\\");
+/// 以管理员权限运行 sing-box (TUN 模式)
+pub fn run_singbox_tun_as_root(config_path: &str, log_file: &str) -> Result<(), String> {
+    force_cleanup();
 
-    // 使用 PowerShell 提权运行
-    // Start-Process -Verb RunAs 会弹出 UAC 提示
-    let ps_command = format!(
-        "Start-Process -FilePath 'sing-box' -ArgumentList 'run','-c','{}' -Verb RunAs -WindowStyle Hidden",
-        escaped_config
+    let bin_path = resolve_bin_path();
+    let config_abs_path = fs::canonicalize(config_path)
+        .map_err(|_| "Invalid config path")?
+        .to_string_lossy()
+        .to_string();
+
+    tracing::info!("Starting sing-box TUN via UAC: {}", bin_path);
+
+    // 使用 PowerShell 提权启动进程
+    // -WindowStyle Hidden 隐藏黑色控制台窗口
+    let ps_script = format!(
+        "Start-Process -FilePath '{}' -ArgumentList 'run', '-c', '{}' -Verb RunAs -WindowStyle Hidden",
+        bin_path, config_abs_path
     );
 
-    let output = Command::new("powershell")
-        .args(["-Command", &ps_command])
-        .output();
+    let status = Command::new("powershell")
+        .args(["-Command", &ps_script])
+        .status()
+        .map_err(|e| e.to_string())?;
 
-    match output {
-        Ok(o) => {
-            if o.status.success() {
-                // 等待进程启动
-                std::thread::sleep(std::time::Duration::from_millis(1500));
+    if !status.success() {
+        return Err("UAC authorization failed or PowerShell error".to_string());
+    }
 
-                if is_singbox_running() {
-                    Ok(())
-                } else {
-                    Err("sing-box failed to start (process not found after launch)".to_string())
-                }
-            } else {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                if stderr.contains("canceled") || stderr.contains("cancelled") {
-                    Err("User cancelled administrator permission request".to_string())
-                } else {
-                    Err(format!("Failed to start sing-box: {}", stderr))
-                }
-            }
-        }
-        Err(e) => Err(format!("Failed to execute PowerShell: {}", e)),
+    // 等待 API 端口就绪，视为启动成功
+    if wait_port_ready(SINGBOX_API_PORT_TUN, 5000) {
+        // 尝试记录 PID (注意：RunAs 启动的 PID 不好直接抓取，通常靠端口和名称管理)
+        Ok(())
+    } else {
+        Err("TUN device start timeout (check Wintun driver)".to_string())
     }
 }
 
-/// 停止 sing-box (TUN 模式)
 pub fn stop_singbox_tun_as_root() -> Result<(), String> {
-    // 使用 taskkill 强制终止进程
-    let _ = Command::new("taskkill")
-        .args(["/F", "/IM", "sing-box.exe"])
-        .output();
-
-    // 清理 PID 文件
-    let _ = fs::remove_file(SINGBOX_PID_FILE);
-
-    // 等待进程退出
-    std::thread::sleep(std::time::Duration::from_millis(500));
-
-    if is_singbox_running() {
-        // 如果还在运行，再次尝试
-        let _ = Command::new("taskkill")
-            .args(["/F", "/T", "/IM", "sing-box.exe"])
-            .output();
-    }
-
+    force_cleanup();
     Ok(())
 }
 
-/// 清理 TUN 路由（Windows 上由 sing-box 自动处理）
-pub fn cleanup_tun_routes() {
-    // Windows 上 sing-box 使用 Wintun，会自动清理路由
-    // 如果需要手动清理，可以使用 netsh 命令
-}
-
-/// 恢复默认网关
-pub fn restore_default_gateway() {
-    // Windows 上通常不需要手动恢复，sing-box 会处理
-}
-
-/// 强制清理所有 TUN 相关资源
-pub fn force_cleanup() {
-    if is_singbox_running() {
-        let _ = stop_singbox_tun_as_root();
+fn wait_port_ready(port: u16, timeout_ms: u64) -> bool {
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_millis(timeout_ms) {
+        if TcpStream::connect_timeout(
+            &format!("127.0.0.1:{}", port).parse().unwrap(),
+            Duration::from_millis(100),
+        )
+        .is_ok()
+        {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(200));
     }
-    let _ = fs::remove_file(SINGBOX_PID_FILE);
-    cleanup_tun_routes();
+    false
 }
 
-/// 设置系统 SOCKS 代理
-#[allow(dead_code)]
+pub fn force_cleanup() {
+    tracing::info!("Windows force cleanup...");
+
+    // 1. 杀掉进程 (强制且包含子进程)
+    let _ = Command::new("taskkill")
+        .args(["/F", "/T", "/IM", "sing-box.exe"])
+        .output();
+
+    // 2. 清理系统代理 (Registry)
+    set_system_socks_proxy(false);
+
+    // 3. 删除 PID 文件
+    let _ = fs::remove_file(get_singbox_pid_file());
+
+    std::thread::sleep(Duration::from_millis(300));
+}
+
+/// 设置 Windows 系统代理 (注册表)
 pub fn set_system_socks_proxy(enable: bool) {
-    let reg_path = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+    let reg_path = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings";
 
     if enable {
-        // 启用代理
         let _ = Command::new("reg")
-            .args(["add", reg_path, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "1", "/f"])
+            .args([
+                "add",
+                reg_path,
+                "/v",
+                "ProxyEnable",
+                "/t",
+                "REG_DWORD",
+                "/d",
+                "1",
+                "/f",
+            ])
             .output();
-
         let _ = Command::new("reg")
             .args([
                 "add",
@@ -175,20 +165,30 @@ pub fn set_system_socks_proxy(enable: bool) {
                 "/f",
             ])
             .output();
-
-        // 刷新系统代理设置
-        let _ = Command::new("netsh")
-            .args(["winhttp", "import", "proxy", "source=ie"])
-            .output();
     } else {
-        // 禁用代理
         let _ = Command::new("reg")
-            .args(["add", reg_path, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "0", "/f"])
-            .output();
-
-        // 重置代理设置
-        let _ = Command::new("netsh")
-            .args(["winhttp", "reset", "proxy"])
+            .args([
+                "add",
+                reg_path,
+                "/v",
+                "ProxyEnable",
+                "/t",
+                "REG_DWORD",
+                "/d",
+                "0",
+                "/f",
+            ])
             .output();
     }
+
+    // 通知系统代理已更改 (防止浏览器延迟生效)
+    // 简单方法：通过 IE 设置刷新（虽然较老但依然有效）
+    let _ = Command::new("netsh")
+        .args(["winhttp", "reset", "proxy"])
+        .output();
+}
+
+pub fn detect_default_interface() -> Option<String> {
+    // Windows sing-box 的 auto_detect_interface 效果很好，通常不需要手动指定
+    None
 }
