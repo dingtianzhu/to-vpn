@@ -35,7 +35,9 @@
       "binaries/sing-box"
     ],
     "resources": [
-      "resources/scripts/*"
+      "resources/scripts/*",
+      "binaries/wintun.dll"
+
     ],
     "active": true,
     "targets": "all",
