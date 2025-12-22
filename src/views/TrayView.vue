@@ -17,7 +17,6 @@ const isLoading = ref(false)
 
 const downloadSpeed = computed(() => isConnected.value ? formatBytes(stats.value.downloadSpeed) + '/s' : '0 B/s')
 const uploadSpeed = computed(() => isConnected.value ? formatBytes(stats.value.uploadSpeed) + '/s' : '0 B/s')
-
 async function handleConnect() {
   if (isLoading.value) return
   const authStore = useAuthStore()
