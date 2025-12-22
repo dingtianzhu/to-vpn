@@ -27,6 +27,15 @@
           "sidecar": true
         }
       ]
+    },
+    "http:default",
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [
+        {
+          "url": "http://182.92.114.35:8080/*"
+        }
+      ]
     }
   ]
 }

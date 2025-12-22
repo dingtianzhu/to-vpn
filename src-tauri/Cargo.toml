@@ -28,6 +28,7 @@ dirs = "5.0"
 reqwest = { version = "0.12", features = ["json", "blocking", "socks"] }
 tauri-plugin-process = "2.3.1"
 tokio = { version = "1", features = ["net"] }
+tauri-plugin-http = "2.5.4"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 [features]

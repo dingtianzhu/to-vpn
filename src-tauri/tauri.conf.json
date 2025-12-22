@@ -31,13 +31,15 @@
     "withGlobalTauri": false
   },
   "bundle": {
+    "macOS": {
+      "infoPlist": "Info.plist"
+    },
     "externalBin": [
       "binaries/sing-box"
     ],
     "resources": [
       "resources/scripts/*",
       "binaries/wintun.dll"
-
     ],
     "active": true,
     "targets": "all",
