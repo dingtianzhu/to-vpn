@@ -5,7 +5,8 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import { useVpnStore } from '@/stores/vpn'
 import { useServersStore } from '@/stores/servers'
 import { useAuthStore } from '@/stores/auth'
-
+import { useRouter } from 'vue-router';
+import { listen } from '@tauri-apps/api/event';
 const vpnStore = useVpnStore()
 const serversStore = useServersStore()
 const authStore = useAuthStore()
@@ -39,8 +40,14 @@ onMounted(async () => {
 
   await vpnStore.checkHelperStatus()
   await serversStore.loadServers()
-
+  const router = useRouter();
   document.addEventListener('visibilitychange', handleVisibilityChange)
+  console.log(getCurrentWindow().label)
+  if (getCurrentWindow().label === 'main') {
+    await listen('navigate-to-login', () => {
+      router.push('/login');
+    });
+  }
 
   try {
     const appWindow = getCurrentWindow()

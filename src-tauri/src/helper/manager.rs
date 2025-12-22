@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::Manager;
-use tauri::path::BaseDirectory;
+
 use tracing::{error, info};
 
 use super::constants::get_helper_marker_path;
@@ -23,6 +23,7 @@ pub async fn install_helper(app_handle: tauri::AppHandle) -> Result<HelperResult
     // === Windows 平台逻辑 ===
     #[cfg(target_os = "windows")]
     {
+        use tauri::path::BaseDirectory;
         let marker_path = get_helper_marker_path();
         info!("Windows: Checking environment...");
         if let Some(parent) = marker_path.parent() {

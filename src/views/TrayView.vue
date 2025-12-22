@@ -5,12 +5,14 @@ import { useVpnStore } from '@/stores/vpn'
 import { useI18nStore } from '@/stores/i18n'
 import { storeToRefs } from 'pinia'
 import { formatBytes } from '@/utils/format'
-
+import { useAuthStore } from '@/stores/auth'
+import { emit } from '@tauri-apps/api/event';
+// 引入按钮组件
+import VpnButton from '@/components/dashboard/ConnectButton.vue'
 const vpnStore = useVpnStore()
 const i18nStore = useI18nStore()
 const { status, stats, isConnected } = storeToRefs(vpnStore)
 const { t } = storeToRefs(i18nStore)
-
 const isLoading = ref(false)
 
 const downloadSpeed = computed(() => isConnected.value ? formatBytes(stats.value.downloadSpeed) + '/s' : '0 B/s')
@@ -18,6 +20,16 @@ const uploadSpeed = computed(() => isConnected.value ? formatBytes(stats.value.u
 
 async function handleConnect() {
   if (isLoading.value) return
+  const authStore = useAuthStore()
+  await authStore.syncFromStorage();
+
+  if (authStore.needsLogin) {
+    console.log("检测到需要登录，唤起主窗口");
+    await emit('navigate-to-login');
+    await invoke('show_main_window');
+
+    return;
+  }
   isLoading.value = true
   try {
     if (status.value === 'connected') {
@@ -26,9 +38,10 @@ async function handleConnect() {
       await vpnStore.connect()
     }
   } catch (e) {
-    await invoke('show_main_window')
+    showMainWindow
   } finally {
     isLoading.value = false
+    showMainWindow
   }
 }
 
@@ -60,7 +73,7 @@ onMounted(() => {
             <svg class="arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
               <path d="M5 15l7-7 7 7" />
             </svg>
-            <span>上传</span>
+            <span>{{ t.tray.upload }}</span>
           </div>
           <div class="stat-value color-up">{{ uploadSpeed }}</div>
         </div>
@@ -72,7 +85,7 @@ onMounted(() => {
             <svg class="arrow-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
               <path d="M19 9l-7 7-7-7" />
             </svg>
-            <span>下载</span>
+            <span>{{ t.tray.download }}</span>
           </div>
           <div class="stat-value color-down">{{ downloadSpeed }}</div>
         </div>
@@ -80,27 +93,8 @@ onMounted(() => {
 
       <!-- 2. 中间圆形连接按钮 (增加图标切换和转圈动画) -->
       <div class="connect-area">
-        <button class="circle-btn" :class="status" :disabled="isLoading" @click="handleConnect">
-          <div class="circle-content">
-            <!-- 根据状态显示不同图标 -->
-            <svg v-if="status === 'connected'" class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              stroke-width="3">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-            <svg v-else-if="status === 'connecting'" class="btn-icon rotating" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" stroke-width="3">
-              <path stroke-linecap="round" stroke-linejoin="round"
-                d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10" />
-            </svg>
-            <svg v-else class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-
-            <span class="btn-text">
-              {{ status === 'connected' ? '断开' : (status === 'connecting' ? '连接中' : '连接') }}
-            </span>
-          </div>
-        </button>
+        <VpnButton :status="status" :disabled="isLoading" size="sm" :can-cancel="true" @click="handleConnect"
+          @cancel="handleConnect" />
       </div>
 
       <!-- 3. 底部导航区 (增加主页和退出图标) -->
@@ -110,13 +104,13 @@ onMounted(() => {
             <path
               d="M3 12l9-9 9 9M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
           </svg>
-          <span>主页</span>
+          <span>{{ t.tray.home }}</span>
         </button>
         <button class="flat-btn" @click="handleExit">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
           </svg>
-          <span>退出</span>
+          <span>{{ t.tray.exit }}</span>
         </button>
       </div>
 
@@ -138,38 +132,47 @@ body,
 </style>
 
 <style scoped>
+/* 舞台容器：撑满窗口 */
 .tray-stage {
-  /* 严格遵循成功版本的 100vw/vh 和 0 padding */
   width: 100vw;
   height: 100vh;
   display: flex;
   background: transparent !important;
   padding: 0;
+  box-sizing: border-box;
 }
 
+/* 核心卡片容器：磨砂玻璃效果 */
 .tray-card {
   flex: 1;
   display: flex;
   flex-direction: column;
-  /* 背景调浅：从 0.95 降到 0.8，增加磨砂感 */
-  background: rgba(50, 50, 52, 0.8);
-  backdrop-filter: blur(25px);
-  -webkit-backdrop-filter: blur(25px);
+  /* 磨砂背景色：暗深色调，透明度 0.8 */
+  background: rgba(30, 30, 32, 0.85);
+  /* 磨砂模糊核心 */
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
 
-  /* 圆角 */
-  border-radius: 24px;
+  /* 圆角和细边框 */
+  border-radius: 20px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+
 }
 
-/* 流量统计区 */
+/* 1. 流量统计区 */
 .stats-area {
-  margin: 12px;
-  padding: 12px 0;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 16px;
+  margin: 12px 12px 0 12px;
+  padding: 10px 0;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 14px;
   display: flex;
   align-items: center;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.stats-area:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .stat-item {
@@ -183,30 +186,37 @@ body,
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: 10px;
   color: #a1a1a6;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
   margin-bottom: 2px;
 }
 
 .stat-value {
-  font-size: 16px;
-  font-weight: 800;
-  font-family: 'SF Pro Display', ui-monospace, monospace;
+  font-size: 15px;
+  font-weight: 700;
+  /* 等宽字体让数字跳动时页面不抖动 */
+  font-family: 'SF Pro Display', 'Roboto Mono', ui-monospace, monospace;
 }
 
 .stat-divider {
   width: 1px;
-  height: 24px;
+  height: 20px;
   background: rgba(255, 255, 255, 0.1);
 }
 
+/* 统计颜色 */
 .color-up {
   color: #ff9f0a;
 }
 
+/* 橙色 - 上传 */
 .color-down {
   color: #0a84ff;
 }
+
+/* 蓝色 - 下载 */
 
 .arrow-up,
 .arrow-down {
@@ -214,59 +224,87 @@ body,
   height: 10px;
 }
 
-/* 按钮区：增加平滑过渡动画 */
+/* 2. 中间连接按钮区 */
 .connect-area {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
+  /* 核心：由于 VpnButton 有 ping 扩散动画，必须留出 padding */
+  padding: 12px;
+  position: relative;
 }
 
-.circle-btn {
-  width: 100px;
-  height: 100px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(255, 255, 255, 0.1);
-  color: white;
-  cursor: pointer;
-  /* transition 只针对颜色，不影响布局，减少重绘开销 */
-  transition: background-color 0.3s ease;
-  /* 开启硬件加速隔离层，防止重绘影响四角 */
-  transform: translateZ(0);
-}
+/* 补充：确保连接按钮区域不要把底部顶得太死 */
 
-.circle-btn.connected {
-  background-color: #34c759;
-}
 
-.circle-btn.connecting {
-  background-color: #ffd60a;
-  color: #000;
-}
-
-.circle-content {
+/* 3. 底部导航区 */
+.nav-area {
   display: flex;
-  flex-direction: column;
+  /* 改用 flex，垂直居中更稳 */
   align-items: center;
+  /* 核心：子元素（按钮）垂直居中 */
+  justify-content: center;
+  /* 核心：子元素水平居中 */
+  gap: 12px;
+
+  /* 关键修改点 */
+  height: 64px;
+  height: 64px;
+  /* 明确给一个较高的固定高度，方便看居中效果 */
+  padding: 0 16px;
+  /* 只留左右边距，取消上下内边距 */
+
+  background: rgba(0, 0, 0, 0.45);
+  /* 加深一点背景，对比更明显 */
+  flex-shrink: 0;
+  /* 防止被上方内容挤扁 */
+  box-sizing: border-box;
 }
 
-.btn-icon {
-  width: 32px;
-  height: 32px;
-  margin-bottom: 2px;
-}
+/* 扁平化按钮 */
+.flat-btn {
+  flex: 1;
+  /* 两个按钮平分宽度 */
+  max-width: 140px;
+  /* 限制最大宽度，防止太长难看 */
+  height: 42px;
+  /* 按钮自身高度 */
 
-.btn-text {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  color: #efeff4;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-/* 旋转动画：只针对图标，不针对整个按钮 */
-.rotating {
-  animation: spin 1s linear infinite;
+.flat-btn:hover {
+  background: rgba(255, 255, 255, 0.25) !important;
+  transform: translateY(-1px);
 }
 
+
+
+.flat-btn:active {
+  transform: translateY(0);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.nav-icon {
+  width: 16px;
+  height: 16px;
+  color: #fff;
+}
+
+/* 旋转动画 (如果 VpnButton 没自带的话可以用这个) */
 @keyframes spin {
   from {
     transform: rotate(0deg);
@@ -277,37 +315,7 @@ body,
   }
 }
 
-/* 底部导航 */
-.nav-area {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  padding: 12px;
-}
-
-.flat-btn {
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  /* 图标文字间距 */
-  background: rgba(255, 255, 255, 0.1);
-  border: none;
-  border-radius: 14px;
-  color: #fff;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.nav-icon {
-  width: 18px;
-  height: 18px;
-  opacity: 0.9;
-}
-
-.flat-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
+.rotating {
+  animation: spin 1.2s linear infinite;
 }
 </style>

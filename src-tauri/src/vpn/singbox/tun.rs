@@ -34,7 +34,7 @@ pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths
         "type": "tun",
         "tag": "tun-in",
         // FIX 1: 添加 IPv6 CIDR，让 TUN 网卡具备接收 IPv6 能力
-        "address": [tun::IPV4_ADDRESS, tun::IPV6_ADDRESS],
+        "address": [tun::IPV4_ADDRESS],
         "mtu": mtu,
         "auto_route": true,
         "strict_route": false,
@@ -69,7 +69,7 @@ pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths
         ],
         "final": "remote-dns",
         // FIX 2: 允许解析 IPv6，否则虽然网卡支持了，但域名解析不到 IPv6 地址
-        "strategy": "prefer_ipv4",
+        "strategy": "ipv4_only",
         "independent_cache": true
     });
 

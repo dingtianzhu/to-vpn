@@ -182,7 +182,21 @@ export const useAuthStore = defineStore("auth", () => {
       autoRefreshTimer = null;
     }
   }
+  // ⚠️ 新增：从持久化存储强制同步状态到内存
+  async function syncFromStorage() {
+    // 1. 同步用户信息 (localStorage 是跨窗口共享的)
+    currentUser.value = getItem(USER_KEY, null);
 
+    // 2. 同步 Token (安全存储也是跨窗口共享的)
+    accessToken.value = await secureGet(SECURE_KEYS.ACCESS_TOKEN, "");
+    refreshToken.value = await secureGet(SECURE_KEYS.REFRESH_TOKEN, "");
+    tokenExpireAt.value = await secureGet(SECURE_KEYS.TOKEN_EXPIRE_AT, 0);
+
+    // 同步到请求拦截器
+    updateCachedToken(accessToken.value);
+
+    console.log("Tray window synced auth state from storage");
+  }
   // ============ Token 初始化（从安全存储加载）============
   async function initializeTokens(): Promise<void> {
     if (isTokensLoaded.value) return;
@@ -200,7 +214,9 @@ export const useAuthStore = defineStore("auth", () => {
         const legacyExpire = getItem(LEGACY_TOKEN_EXPIRE_KEY, 0);
 
         if (legacyToken) {
-          console.log("Migrating tokens from localStorage to secure storage...");
+          console.log(
+            "Migrating tokens from localStorage to secure storage..."
+          );
           token = legacyToken;
           refresh = legacyRefresh;
           expireAt = legacyExpire;
@@ -262,7 +278,7 @@ export const useAuthStore = defineStore("auth", () => {
 
       // 用户信息存 localStorage（不敏感）
       setItem(USER_KEY, res.user);
-      
+
       // Token 存安全存储
       await secureSet(SECURE_KEYS.ACCESS_TOKEN, res.access_token);
       await secureSet(SECURE_KEYS.REFRESH_TOKEN, res.refresh_token);
@@ -472,7 +488,7 @@ export const useAuthStore = defineStore("auth", () => {
     pendingAutoConnect,
     isRefreshing,
     isTokensLoaded,
-
+    syncFromStorage,
     // Getters
     isTokenValid,
     isTokenExpiringSoon,

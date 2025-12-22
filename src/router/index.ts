@@ -2,6 +2,7 @@ import { createRouter, createWebHashHistory } from "vue-router";
 import { ref } from "vue";
 import HomeView from "@/views/HomeView.vue";
 import { useAuthStore } from "@/stores/auth";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 // 路由加载状态（可在组件中使用）
 export const isRouteLoading = ref(false);
@@ -75,6 +76,7 @@ const router = createRouter({
 
 // 路由守卫
 router.beforeEach(async (to, _from, next) => {
+  const windowLabel = getCurrentWindow().label;
   // 开始加载
   isRouteLoading.value = true;
   routeError.value = null;
@@ -90,7 +92,7 @@ router.beforeEach(async (to, _from, next) => {
     // 检查 Token 有效性
     if (authStore.accessToken && !authStore.isTokenValid) {
       const refreshed = await authStore.checkAndRefreshToken();
-      if (!refreshed && to.meta.requiresAuth) {
+      if (!refreshed && to.meta.requiresAuth && windowLabel !== "tray_popup") {
         // Token 刷新失败且需要认证，跳转登录
         return next({
           path: "/login",
@@ -123,7 +125,7 @@ router.beforeEach(async (to, _from, next) => {
       error instanceof Error ? error.message : "Navigation error";
 
     // 发生错误时，如果是需要认证的页面，跳转到登录
-    if (to.meta.requiresAuth) {
+    if (to.meta.requiresAuth && windowLabel !== "tray_popup") {
       return next({
         path: "/login",
         query: { redirect: to.fullPath },

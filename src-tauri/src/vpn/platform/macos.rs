@@ -18,6 +18,7 @@ const SYSTEM_BIN_PATH: &str = "/Library/Application Support/ToVPN/sing-box";
 const CMD_SUDO: &str = "/usr/bin/sudo";
 const CMD_PGREP: &str = "/usr/bin/pgrep";
 const CMD_PKILL: &str = "/usr/bin/pkill";
+#[allow(dead_code)]
 const CMD_ROUTE: &str = "/sbin/route";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -62,6 +63,7 @@ fn kill_process_by_port(port: u16) {
     }
 }
 
+#[allow(dead_code)]
 pub fn detect_default_interface() -> Option<String> {
     let out = Command::new(CMD_ROUTE)
         .args(["-n", "get", "default"])
