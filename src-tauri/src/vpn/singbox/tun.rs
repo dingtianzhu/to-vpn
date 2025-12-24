@@ -15,7 +15,7 @@ pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths
     let mtu = if config.mtu > 0 && config.mtu <= MTU_MAX {
         config.mtu
     } else {
-        9000
+        MTU_MAX
     };
 
     // 2. 解析 IP
@@ -34,11 +34,11 @@ pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths
         "type": "tun",
         "tag": "tun-in",
         // FIX 1: 添加 IPv6 CIDR，让 TUN 网卡具备接收 IPv6 能力
-        "address": [tun::IPV4_ADDRESS],
+        "address": [tun::IPV4_ADDRESS,tun::IPV6_ADDRESS],
         "mtu": mtu,
         "auto_route": true,
-        "strict_route": false,
-        "stack": "gvisor",
+        "strict_route": true,
+        "stack": "gvisor",//gvisor
         "sniff": true,
         "sniff_override_destination": true,
         "platform": {
@@ -57,15 +57,15 @@ pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths
     let dns_config = json!({
         "servers": [
             { "tag": "local-dns", "address": local_dns_addr, "detour": "direct" },
-            { "tag": "remote-dns", "address": remote_dns_addr, "detour": "proxy" },
-            { "tag": "block-dns", "address": "rcode://success" }
+            { "tag": "remote-dns", "address": remote_dns_addr, "detour": "proxy" }
         ],
         "rules": [
-            // 注意：rule 是从上到下匹配的
-            { "outbound": "any", "server": "local-dns" },
-            { "domain_suffix": [".cn"], "server": "local-dns" },
+            // 1. 本地直连域名的 DNS 走本地
             { "rule_set": "geosite-cn", "server": "local-dns" },
-            { "protocol": "quic", "server": "block-dns" }
+            // 2. 特殊后缀走本地
+            { "domain_suffix": [".cn", ".lan", ".local"], "server": "local-dns" },
+            // 3. 剩下的（外网）全部强制走远程加密 DNS
+            { "query_type": ["A", "AAAA"], "server": "remote-dns" }
         ],
         "final": "remote-dns",
         // FIX 2: 允许解析 IPv6，否则虽然网卡支持了，但域名解析不到 IPv6 地址
@@ -75,24 +75,26 @@ pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths
 
     // 5. 路由规则
     let mut route_rules = Vec::new();
+    // A. 强制绕过 VPS 服务器 IP (防止环路)
+    if !server_ips.is_empty() {
+        let cidrs: Vec<String> = server_ips
+            .iter()
+            .map(|ip| {
+                if ip.is_ipv4() {
+                    format!("{}/32", ip)
+                } else {
+                    format!("{}/128", ip)
+                }
+            })
+            .collect();
+        route_rules.push(json!({ "ip_cidr": cidrs, "outbound": "direct" }));
+    }
     route_rules.push(json!({ "protocol": "dns", "action": "hijack-dns" }));
     route_rules.push(
         json!({ "domain_suffix": [".lan", ".local", ".home", ".internal"], "outbound": "direct" }),
     );
     // 屏蔽 QUIC (UDP 443)
     route_rules.push(json!({ "port": 443, "network": "udp", "action": "reject" }));
-
-    if !server_ips.is_empty() {
-        let cidrs: Vec<String> = server_ips
-            .iter()
-            .filter(|ip| ip.is_ipv4())
-            .map(|ip| format!("{}/32", ip))
-            .collect();
-        if !cidrs.is_empty() {
-            route_rules.push(json!({ "ip_cidr": cidrs, "outbound": "direct" }));
-        }
-    }
-
     route_rules.push(json!({ "rule_set": "geosite-cn", "outbound": "direct" }));
     route_rules.push(json!({ "rule_set": "geoip-cn", "outbound": "direct" }));
     route_rules.push(json!({ "ip_is_private": true, "outbound": "direct" }));
@@ -104,8 +106,9 @@ pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths
         "server": hysteria_server,
         "server_port": config.server_port,
         "password": config.password,
-        "up_mbps": 100,
-        "down_mbps": 100,
+        "up_mbps": 200,
+        "down_mbps": 500,
+        "tcp_fast_open": true,
         "tls": {
             "enabled": true,
             "alpn": ["h3"],
@@ -114,11 +117,19 @@ pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths
         }
     });
 
-    let direct_ob = json!({ "type": "direct", "tag": "direct" });
+    // let direct_ob = json!({ "type": "direct", "tag": "direct" });
+    // 修改 outbounds 部分
+    let direct_ob = json!({
+        "type": "direct",
+        "tag": "direct",
+        "bind_interface": "en0" // 这是一个难点：不同机器网卡名不同
+    });
 
     let route_config = json!({
         "auto_detect_interface": true,
+
         "final": "proxy",
+
         "rule_set": [
             { "tag": "geosite-cn", "type": "local", "format": "binary", "path": ruleset.geosite_cn },
             { "tag": "geoip-cn", "type": "local", "format": "binary", "path": ruleset.geoip_cn }

@@ -55,5 +55,5 @@ pub mod dns {
 /// TUN 网络配置
 pub mod tun {
     pub const IPV4_ADDRESS: &str = "172.19.0.1/30";
-    // pub const IPV6_ADDRESS: &str = "fd00::1/126";
+    pub const IPV6_ADDRESS: &str = "fdfe::1/126";
 }

@@ -87,8 +87,8 @@ pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths
         "server": hysteria_server,
         "server_port": config.server_port,
         "password": config.password,
-        "up_mbps": 100,
-        "down_mbps": 100,
+        "up_mbps": 200,
+        "down_mbps": 500,
         "tls": {
             "enabled": true,
             "alpn": ["h3"],

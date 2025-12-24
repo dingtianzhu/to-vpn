@@ -12,7 +12,9 @@ use vpn::state::VpnState;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     logging::init();
-
+    tracing::info!("Performing startup cleanup...");
+    platform::force_cleanup();
+    vpn::proxy::set_system_socks_proxy(false);
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init()) // 必须添加这一行
