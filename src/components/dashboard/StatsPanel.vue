@@ -33,25 +33,37 @@ const ipDisplay = computed(() => {
   return t.value.stats.hidden
 })
 
+// 格式化速度显示：速度为 0 时显示 "--"
+const formatSpeed = (speed: number): string => {
+  if (speed === 0) return '--'
+  return formatBytes(speed) + '/s'
+}
+
+// 格式化延迟显示：延迟为 -1 或 >= 9999 时显示 "--"
+const formatLatency = (latency: number): string => {
+  if (latency < 0 || latency >= 9999) return '--'
+  return `${latency} ms`
+}
+
 const displayStats = computed(() => [
   {
     icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4',
     label: t.value.stats.download,
-    value: props.isConnected ? formatBytes(props.stats.downloadSpeed) + '/s' : '—',
+    value: props.isConnected ? formatSpeed(props.stats.downloadSpeed) : '—',
     color: 'text-sky-500 dark:text-sky-400',
     bg: 'bg-sky-50 dark:bg-sky-500/10'
   },
   {
     icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12',
     label: t.value.stats.upload,
-    value: props.isConnected ? formatBytes(props.stats.uploadSpeed) + '/s' : '—',
+    value: props.isConnected ? formatSpeed(props.stats.uploadSpeed) : '—',
     color: 'text-orange-500 dark:text-orange-400',
     bg: 'bg-orange-50 dark:bg-orange-500/10'
   },
   {
     icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
     label: t.value.stats.latency,
-    value: props.isConnected ? `${props.stats.latency} ms` : '—',
+    value: props.isConnected ? formatLatency(props.stats.latency) : '—',
     color: 'text-emerald-500 dark:text-emerald-400',
     bg: 'bg-emerald-50 dark:bg-emerald-500/10'
   },

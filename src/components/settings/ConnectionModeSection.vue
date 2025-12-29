@@ -1,15 +1,20 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
+import { useVpnStore } from '@/stores/vpn'
 import { useI18nStore } from '@/stores/i18n'
 import { storeToRefs } from 'pinia'
 import type { ConnectionMode } from '@/types'
 
 const settingsStore = useSettingsStore()
+const vpnStore = useVpnStore()
 const i18nStore = useI18nStore()
 
 const { settings } = storeToRefs(settingsStore)
 const { t } = storeToRefs(i18nStore)
+
+const isLocalSwitching = ref(false)
+const switchError = ref<string | null>(null)
 
 interface ModeOption {
   value: ConnectionMode
@@ -33,8 +38,51 @@ const modes = computed<ModeOption[]>(() => [
   }
 ])
 
-function selectMode(mode: ConnectionMode) {
-  settingsStore.setConnectionMode(mode)
+const progressText = computed(() => {
+  const progress = vpnStore.modeSwitchProgress
+  switch (progress) {
+    case 'saving': return 'Saving...'
+    case 'disconnecting': return 'Disconnecting...'
+    case 'switching': return 'Switching...'
+    case 'connecting': return 'Reconnecting...'
+    case 'rolling_back': return 'Rolling back...'
+    default: return ''
+  }
+})
+
+const isSwitching = computed(() => {
+  return isLocalSwitching.value || vpnStore.isModeSwitching
+})
+
+const showProgress = computed(() => {
+  const progress = vpnStore.modeSwitchProgress
+  return isSwitching.value && progress !== 'idle' && progress !== 'done' && progress !== 'failed'
+})
+
+async function selectMode(mode: ConnectionMode) {
+  if (settings.value.connectionMode === mode || isSwitching.value) {
+    return
+  }
+
+  switchError.value = null
+  isLocalSwitching.value = true
+
+  try {
+    if (vpnStore.isConnected || vpnStore.isConnecting) {
+      const result = await vpnStore.switchMode(mode)
+      if (!result.success) {
+        switchError.value = result.error
+        setTimeout(() => { switchError.value = null }, 3000)
+      }
+    } else {
+      settingsStore.setConnectionMode(mode)
+    }
+  } catch (e) {
+    switchError.value = e instanceof Error ? e.message : String(e)
+    setTimeout(() => { switchError.value = null }, 3000)
+  } finally {
+    isLocalSwitching.value = false
+  }
 }
 </script>
 
@@ -43,16 +91,34 @@ function selectMode(mode: ConnectionMode) {
     <h2 class="text-[11px] font-semibold text-[var(--vpn-muted)] uppercase tracking-wider mb-2 pl-2">
       {{ t.settings.connectionMode }}
     </h2>
-    <div
-      class="bg-[var(--vpn-card)] border border-[var(--vpn-border)] rounded-xl overflow-hidden shadow-sm grid grid-cols-2 p-1 gap-1">
-      <button v-for="mode in modes" :key="mode.value" @click="selectMode(mode.value)"
-        class="flex flex-col items-center justify-center py-3 rounded-lg transition-all duration-200 border"
-        :class="settings.connectionMode === mode.value
-          ? `bg-blue-50 dark:bg-white/10 shadow-md border-blue-200 dark:border-white/20 ${mode.color} font-medium`
-          : 'border-transparent text-[var(--vpn-text-secondary)] hover:bg-black/5 dark:hover:bg-white/5'">
+    <div class="bg-[var(--vpn-card)] border border-[var(--vpn-border)] rounded-xl overflow-hidden shadow-sm grid grid-cols-2 p-1 gap-1">
+      <button 
+        v-for="mode in modes" 
+        :key="mode.value" 
+        @click="selectMode(mode.value)"
+        :disabled="isSwitching"
+        class="flex flex-col items-center justify-center py-3 rounded-lg transition-all duration-200 border relative"
+        :class="[
+          settings.connectionMode === mode.value
+            ? `bg-blue-50 dark:bg-white/10 shadow-md border-blue-200 dark:border-white/20 font-medium ${mode.color}`
+            : 'border-transparent text-[var(--vpn-text-secondary)] hover:bg-black/5 dark:hover:bg-white/5',
+          isSwitching ? 'opacity-60 cursor-not-allowed' : ''
+        ]">
         <span class="text-[13px]">{{ mode.label }}</span>
         <span class="text-[10px] opacity-60">{{ mode.description }}</span>
       </button>
+    </div>
+    
+    <div v-if="showProgress" class="mt-2 flex items-center justify-center gap-2 text-[11px] text-[var(--vpn-muted)]">
+      <svg class="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
+      <span>{{ progressText }}</span>
+    </div>
+    
+    <div v-if="switchError" class="mt-2 text-[11px] text-red-500 dark:text-red-400 text-center px-2">
+      {{ switchError }}
     </div>
   </section>
 </template>

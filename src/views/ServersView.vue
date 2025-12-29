@@ -57,7 +57,8 @@ async function handleServerSelect(serverId: number) {
 
 async function handleRefresh() {
   isRefreshing.value = true
-  await serversStore.testAllPings()
+  // 清除缓存并重新获取 API 数据
+  await serversStore.refreshServers()
   setTimeout(() => isRefreshing.value = false, 500)
 }
 

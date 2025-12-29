@@ -34,9 +34,8 @@ pub fn start_monitor(app_handle: AppHandle, state: &VpnState) {
         let mut last_upload: u64 = 0;
         let mut tick_count: u32 = 0;
 
-        // 是否尝试使用真实 API
-        let mut use_real_api = true;
-        let mut api_fail_count = 0;
+        // API 可用性标志
+        let mut api_available = true;
 
         // 创建 HTTP 客户端（blocking）
         let client = reqwest::blocking::Client::builder()
@@ -62,37 +61,26 @@ pub fn start_monitor(app_handle: AppHandle, state: &VpnState) {
                 }
             };
 
-            // 如果之前切到了模拟数据，周期性尝试恢复真实 API（避免“一直假数据”）
             tick_count = tick_count.wrapping_add(1);
-            if !use_real_api && tick_count % 30 == 0 {
-                use_real_api = true;
-                api_fail_count = 0;
-            }
 
             // 尝试从 sing-box API 获取真实流量
-            let (current_download, current_upload) = if use_real_api {
-                match fetch_traffic_from_api(&client, current_api_port) {
-                    Some((down, up)) => {
-                        api_fail_count = 0;
-                        (down, up)
+            // API 失败时保持上次流量值，速度将显示为 0
+            let (current_download, current_upload) = match fetch_traffic_from_api(&client, current_api_port) {
+                Some((down, up)) => {
+                    if !api_available {
+                        info!("sing-box API recovered (port {})", current_api_port);
+                        api_available = true;
                     }
-                    None => {
-                        api_fail_count += 1;
-                        // 连续失败 3 次后切换到模拟数据
-                        if api_fail_count >= 3 {
-                            if api_fail_count == 3 {
-                                warn!(
-                                    "sing-box API unavailable (port {}), using simulated data",
-                                    current_api_port
-                                );
-                            }
-                            use_real_api = false;
-                        }
-                        generate_simulated_traffic(last_download, last_upload)
-                    }
+                    (down, up)
                 }
-            } else {
-                generate_simulated_traffic(last_download, last_upload)
+                None => {
+                    if api_available {
+                        warn!("sing-box API unavailable (port {}), keeping last values", current_api_port);
+                        api_available = false;
+                    }
+                    // 保持上次的值，速度将显示为 0
+                    (last_download, last_upload)
+                }
             };
 
             let download_speed = current_download.saturating_sub(last_download);
@@ -148,7 +136,8 @@ fn fetch_traffic_from_api(
 }
 
 /// 测量真实延迟 - 通过代理测试
-fn measure_real_latency(port: u16) -> u32 {
+/// 失败时返回 -1 (作为 i32 返回，但存储为 u32 时使用特殊值)
+fn measure_real_latency(_port: u16) -> u32 {
     // 方案 1: 通过 SOCKS 代理测试
     let proxy = reqwest::Proxy::all(format!(
         "socks5://127.0.0.1:{}",
@@ -177,7 +166,7 @@ fn measure_real_latency(port: u16) -> u32 {
     {
         let url = format!(
             "http://127.0.0.1:{}/proxies/proxy/delay?timeout=3000&url=http://www.gstatic.com/generate_204",
-            port
+            _port
         );
 
         if let Ok(response) = client.get(&url).send() {
@@ -193,20 +182,9 @@ fn measure_real_latency(port: u16) -> u32 {
         }
     }
 
-    // 方案 3: 返回模拟值
-    generate_simulated_latency()
-}
-
-/// 生成模拟流量数据（备用）
-fn generate_simulated_traffic(last_down: u64, last_up: u64) -> (u64, u64) {
-    let dl_delta = rand::random::<u64>() % 500_000;
-    let ul_delta = rand::random::<u64>() % 100_000;
-    (last_down + dl_delta, last_up + ul_delta)
-}
-
-/// 生成模拟延迟（备用）
-fn generate_simulated_latency() -> u32 {
-    50 + (rand::random::<u32>() % 100)
+    // 延迟测试失败时返回特殊值 9999 表示无法测量
+    // (使用 9999 而不是 -1，因为返回类型是 u32)
+    9999
 }
 
 /// 停止监控

@@ -29,6 +29,9 @@ pub fn get_tun_lock_file() -> PathBuf {
 /// 默认 SOCKS 代理端口
 pub const DEFAULT_SOCKS_PORT: u16 = 1080;
 
+/// 默认 HTTP 代理端口
+pub const DEFAULT_HTTP_PORT: u16 = 1087;
+
 /// TUN 模式专用的 API 端口
 pub const SINGBOX_API_PORT_TUN: u16 = 9090;
 
@@ -55,5 +58,6 @@ pub mod dns {
 /// TUN 网络配置
 pub mod tun {
     pub const IPV4_ADDRESS: &str = "172.19.0.1/30";
+    #[allow(dead_code)]
     pub const IPV6_ADDRESS: &str = "fdfe::1/126";
 }

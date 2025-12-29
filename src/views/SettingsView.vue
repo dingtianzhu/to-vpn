@@ -9,8 +9,11 @@ import { useVpnStore } from '@/stores/vpn'
 // 拆分后的组件
 import ConnectionModeSection from '@/components/settings/ConnectionModeSection.vue'
 import NetworkPreferencesSection from '@/components/settings/NetworkPreferencesSection.vue'
+import AdvancedNetworkSection from '@/components/settings/AdvancedNetworkSection.vue'
+import RulesetStatusSection from '@/components/settings/RulesetStatusSection.vue'
 import SystemHelperSection from '@/components/settings/SystemHelperSection.vue'
 import GeneralSettingsSection from '@/components/settings/GeneralSettingsSection.vue'
+import ProxyConfigSection from '@/components/settings/ProxyConfigSection.vue'
 
 const router = useRouter()
 const settingsStore = useSettingsStore()
@@ -22,6 +25,7 @@ const { t } = storeToRefs(i18nStore)
 const { status } = storeToRefs(vpnStore)
 // 监听连接模式和 MTU 变化 -> 自动重连
 // 注意：DNS 变化不在这里处理，由 NetworkPreferencesSection 组件处理
+// 注意：高级网络设置变化由 AdvancedNetworkSection 组件处理
 watch(
   () => [settings.value.connectionMode, settings.value.mtu],
   async ([newConnMode, newMtu], [oldConnMode, oldMtu]) => {
@@ -54,8 +58,17 @@ watch(
       <!-- Connection Mode -->
       <ConnectionModeSection />
 
+      <!-- Proxy Config (Terminal) -->
+      <ProxyConfigSection />
+
       <!-- Network Preferences -->
       <NetworkPreferencesSection />
+
+      <!-- Advanced Network Settings -->
+      <AdvancedNetworkSection />
+
+      <!-- Ruleset Status -->
+      <RulesetStatusSection />
 
       <!-- System Helper -->
       <SystemHelperSection />

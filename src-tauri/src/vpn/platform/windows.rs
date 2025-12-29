@@ -150,6 +150,70 @@ pub fn set_system_socks_proxy(enable: bool) {
         .output();
 }
 
+/// 设置系统 HTTP 代理
+/// 
+/// **Feature: vpn-enhancement**
+/// **Validates: Requirements 1.2, 1.4**
+pub fn set_system_http_proxy(enable: bool) {
+    let reg_path = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+    if enable {
+        // Windows 使用统一的代理服务器设置，包含 HTTP 和 HTTPS
+        let _ = Command::new("reg")
+            .args([
+                "add",
+                reg_path,
+                "/v",
+                "ProxyServer",
+                "/t",
+                "REG_SZ",
+                "/d",
+                "http=127.0.0.1:1087;https=127.0.0.1:1087;socks=127.0.0.1:1080",
+                "/f",
+            ])
+            .output();
+    }
+    // 禁用时由 set_system_socks_proxy 统一处理
+}
+
+/// 设置所有系统代理（SOCKS + HTTP）
+/// 
+/// **Feature: vpn-enhancement**
+/// **Validates: Requirements 1.2, 1.4 - 同时设置/清除 SOCKS 和 HTTP 代理**
+pub fn set_system_proxy(enable: bool) {
+    if enable {
+        let reg_path = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+        let _ = Command::new("reg")
+            .args([
+                "add",
+                reg_path,
+                "/v",
+                "ProxyEnable",
+                "/t",
+                "REG_DWORD",
+                "/d",
+                "1",
+                "/f",
+            ])
+            .output();
+        // 设置包含 SOCKS 和 HTTP 的代理服务器
+        let _ = Command::new("reg")
+            .args([
+                "add",
+                reg_path,
+                "/v",
+                "ProxyServer",
+                "/t",
+                "REG_SZ",
+                "/d",
+                "http=127.0.0.1:1087;https=127.0.0.1:1087;socks=127.0.0.1:1080",
+                "/f",
+            ])
+            .output();
+    } else {
+        set_system_socks_proxy(false);
+    }
+}
+
 pub fn detect_default_interface() -> Option<String> {
     None
 }

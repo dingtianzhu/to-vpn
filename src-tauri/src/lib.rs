@@ -7,14 +7,25 @@ mod vpn;
 
 use tauri::Manager;
 use vpn::platform;
+use vpn::ruleset::{check_ruleset_status, RulesetStatus};
 use vpn::state::VpnState;
+
+/// Tauri 命令：检查规则集状态
+///
+/// **Feature: vpn-optimization**
+/// **Validates: Requirements 5.3, 7.2, 7.3**
+#[tauri::command]
+fn get_ruleset_status() -> RulesetStatus {
+    check_ruleset_status()
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     logging::init();
     tracing::info!("Performing startup cleanup...");
     platform::force_cleanup();
-    vpn::proxy::set_system_socks_proxy(false);
+    // 清除所有系统代理（SOCKS + HTTP），防止异常退出后代理残留
+    vpn::proxy::set_system_proxy(false);
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init()) // 必须添加这一行
@@ -36,12 +47,16 @@ pub fn run() {
             // Ping 功能
             vpn::ping::ping_nodes,
             vpn::ping::ping_single_node,
+            vpn::ping::ping_nodes_via_proxy,
+            vpn::ping::ping_single_node_via_proxy,
             vpn::stats::ping_server,
             // 连通性测试
             vpn::connectivity::test_connectivity,
             vpn::connectivity::test_dns_resolution,
             // 🔧 新增: DNS泄漏检测
             vpn::dns_leak_test::check_dns_leak,
+            // 🔧 新增: 规则集状态检查
+            get_ruleset_status,
             // 托盘功能
             tray::hide_tray_popup,
             tray::show_main_window,
@@ -86,7 +101,8 @@ pub fn run() {
 
 fn cleanup_on_exit(app_handle: &tauri::AppHandle) {
     platform::force_cleanup();
-    vpn::proxy::set_system_socks_proxy(false);
+    // 清除所有系统代理（SOCKS + HTTP）
+    vpn::proxy::set_system_proxy(false);
 
     if let Some(state) = app_handle.try_state::<VpnState>() {
         state.reset();

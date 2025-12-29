@@ -15,8 +15,13 @@ export interface VpnSettings {
   dnsMode: DnsMode;
   customDns: string;
   autoReconnect: boolean;
-  killSwitch: boolean;
   connectionMode: ConnectionMode;
+  // 高级网络设置
+  enableTcpFastOpen: boolean;  // TCP Fast Open 开关
+  upMbps: number;              // 上行带宽限制 (Mbps)
+  downMbps: number;            // 下行带宽限制 (Mbps)
+  blockQuic: boolean;          // 阻断 QUIC 流量
+  disableIpv6: boolean;        // TUN 模式下禁用 IPv6（防止泄漏）
 }
 
 export interface ConnectionStats {

@@ -41,3 +41,28 @@ export {
 export { useDailyLimits } from "./useDailyLimits";
 export { useVpnMonitor } from "./useVpnMonitor";
 export { useVpnReconnect } from "./useVpnReconnect";
+export { useLatencyMonitor } from "./useLatencyMonitor";
+export { useModeSwitcher } from "./useModeSwitcher";
+
+// 延迟监控类型导出
+export type { LatencyMetrics, LatencyAnomalyResult } from "./useLatencyMonitor";
+export { 
+    DEFAULT_LATENCY_METRICS,
+    calculateAverage,
+    calculateJitter,
+    detectLatencyAnomaly,
+    updateMetricsFromSamples,
+} from "./useLatencyMonitor";
+
+// 模式切换器类型导出
+export type { 
+    ModeSwitchProgress, 
+    ModeSwitchState, 
+    ModeSwitchResult 
+} from "./useModeSwitcher";
+export {
+    DEFAULT_MODE_SWITCH_STATE,
+    isValidConnectionMode,
+    getNextProgress,
+    canStartSwitch,
+} from "./useModeSwitcher";

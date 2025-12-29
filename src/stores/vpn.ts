@@ -32,6 +32,8 @@ import {
 import { useDailyLimits } from "./vpn/useDailyLimits";
 import { useVpnMonitor } from "./vpn/useVpnMonitor";
 import { useVpnReconnect } from "./vpn/useVpnReconnect";
+import { useLatencyMonitor } from "./vpn/useLatencyMonitor";
+import { useModeSwitcher } from "./vpn/useModeSwitcher";
 
 // 其他 Store 导入
 import { useLogsStore } from "./logs";
@@ -81,6 +83,8 @@ export const useVpnStore = defineStore("vpn", () => {
   let _dailyLimits: ReturnType<typeof useDailyLimits> | undefined;
   let _monitor: ReturnType<typeof useVpnMonitor> | undefined;
   let _reconnect: ReturnType<typeof useVpnReconnect> | undefined;
+  let _latencyMonitor: ReturnType<typeof useLatencyMonitor> | undefined;
+  let _modeSwitcher: ReturnType<typeof useModeSwitcher> | undefined;
 
   function initSubModules() {
     if (!_dailyLimits) {
@@ -91,6 +95,12 @@ export const useVpnStore = defineStore("vpn", () => {
     }
     if (!_reconnect) {
       _reconnect = useVpnReconnect(connect, status);
+    }
+    if (!_latencyMonitor) {
+      _latencyMonitor = useLatencyMonitor(stats, status);
+    }
+    if (!_modeSwitcher) {
+      _modeSwitcher = useModeSwitcher(status, connect, disconnect);
     }
   }
 
@@ -174,6 +184,7 @@ export const useVpnStore = defineStore("vpn", () => {
         // TS修复: 确认 _monitor 已初始化
         _monitor!.startTrafficMonitor();
         _monitor!.startPingLoop();
+        _latencyMonitor!.startMonitoring(); // 恢复延迟监控
         startRealtimeUsageCheck();
 
         // 确保事件监听器是激活的
@@ -278,6 +289,7 @@ export const useVpnStore = defineStore("vpn", () => {
             startConnectedTimeCounter();
             _monitor!.startTrafficMonitor();
             _monitor!.startPingLoop();
+            _latencyMonitor!.startMonitoring(); // 启动延迟监控
             startRealtimeUsageCheck();
             isUserDisconnecting.value = false;
           } else if (newStatus === "disconnected") {
@@ -285,6 +297,7 @@ export const useVpnStore = defineStore("vpn", () => {
             stopRealtimeUsageCheck();
             _monitor!.stopTrafficMonitor();
             _monitor!.stopPingLoop();
+            _latencyMonitor!.stopMonitoring(); // 停止延迟监控
             if (!isUserDisconnecting.value) _dailyLimits!.accumulateUsage();
             resetStats();
             isUserDisconnecting.value = false;
@@ -503,6 +516,12 @@ export const useVpnStore = defineStore("vpn", () => {
           mode: settingsStore.settings.connectionMode,
           serverMtu: settingsStore.settings.mtu,
           serverDns: dnsConfig,
+          // 高级配置选项
+          tcpFastOpen: settingsStore.settings.enableTcpFastOpen,
+          upMbps: settingsStore.settings.upMbps,
+          downMbps: settingsStore.settings.downMbps,
+          blockQuic: settingsStore.settings.blockQuic,
+          disableIpv6: settingsStore.settings.disableIpv6,
         });
 
         // 短暂等待后同步一次状态
@@ -669,6 +688,8 @@ export const useVpnStore = defineStore("vpn", () => {
     stopConnectedTimeCounter();
     stopRealtimeUsageCheck();
     _monitor?.cleanup();
+    _latencyMonitor?.cleanup(); // 清理延迟监控
+    _modeSwitcher?.cleanup(); // 清理模式切换器
     _reconnect?.cancelReconnect();
     listenersInitialized = false;
   }
@@ -715,6 +736,36 @@ export const useVpnStore = defineStore("vpn", () => {
       initSubModules();
       return _dailyLimits!.pendingConnectAfterPurchase;
     },
+    // 延迟监控 Getters
+    get latencyMetrics() {
+      initSubModules();
+      return _latencyMonitor!.metrics;
+    },
+    get hasLatencyAnomaly() {
+      initSubModules();
+      return _latencyMonitor!.hasAnomaly;
+    },
+    get latencyAnomalyResult() {
+      initSubModules();
+      return _latencyMonitor!.anomalyResult;
+    },
+    // 模式切换器 Getters
+    get modeSwitchState() {
+      initSubModules();
+      return _modeSwitcher!.state;
+    },
+    get isModeSwitching() {
+      initSubModules();
+      return _modeSwitcher!.isSwitching;
+    },
+    get modeSwitchProgress() {
+      initSubModules();
+      return _modeSwitcher!.progress;
+    },
+    get modeSwitchError() {
+      initSubModules();
+      return _modeSwitcher!.switchError;
+    },
     // Getters
     isConnected,
     isConnecting,
@@ -744,5 +795,31 @@ export const useVpnStore = defineStore("vpn", () => {
     handlePurchaseSuccess,
     clearError,
     testConnectivity,
+    // 延迟监控 Actions
+    getLatencyMetricsSnapshot() {
+      initSubModules();
+      return _latencyMonitor!.getMetricsSnapshot();
+    },
+    checkLatencyAnomaly() {
+      initSubModules();
+      return _latencyMonitor!.checkAnomaly();
+    },
+    // 模式切换器 Actions
+    async switchMode(targetMode: "tun" | "socks") {
+      initSubModules();
+      return _modeSwitcher!.switchMode(targetMode);
+    },
+    async rollbackModeSwitch() {
+      initSubModules();
+      return _modeSwitcher!.rollback();
+    },
+    cancelModeSwitch() {
+      initSubModules();
+      _modeSwitcher!.cancelSwitch();
+    },
+    getModeSwitchStateSnapshot() {
+      initSubModules();
+      return _modeSwitcher!.getStateSnapshot();
+    },
   };
 });

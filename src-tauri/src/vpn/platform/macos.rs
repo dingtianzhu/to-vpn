@@ -28,8 +28,26 @@ struct TunRuntimeState {
 }
 
 /// 满足 platform 模块导出的代理设置函数
+#[allow(dead_code)]
 pub fn set_system_socks_proxy(enable: bool) {
     crate::vpn::proxy::set_system_socks_proxy(enable);
+}
+
+/// 设置系统 HTTP 代理
+/// 
+/// **Feature: vpn-enhancement**
+/// **Validates: Requirements 1.2, 1.4**
+#[allow(dead_code)]
+pub fn set_system_http_proxy(enable: bool) {
+    crate::vpn::proxy::set_system_http_proxy(enable);
+}
+
+/// 设置所有系统代理（SOCKS + HTTP）
+/// 
+/// **Feature: vpn-enhancement**
+/// **Validates: Requirements 1.2, 1.4 - 同时设置/清除 SOCKS 和 HTTP 代理**
+pub fn set_system_proxy(enable: bool) {
+    crate::vpn::proxy::set_system_proxy(enable);
 }
 
 fn sudo_ok(args: &[&str]) -> bool {
@@ -240,4 +258,53 @@ pub fn force_cleanup() {
 
     let _ = fs::remove_file(get_singbox_pid_file());
     let _ = fs::remove_file(get_tun_lock_file());
+}
+
+/// 获取当前活动的网络服务名称
+fn get_active_network_service() -> Option<String> {
+    let output = Command::new("networksetup")
+        .args(["-listallnetworkservices"])
+        .output()
+        .ok()?;
+
+    let services = String::from_utf8_lossy(&output.stdout);
+
+    for line in services.lines().skip(1) {
+        if line.starts_with('*') {
+            continue;
+        }
+        let name = line.trim();
+        if name.contains("Wi-Fi") || name.contains("Ethernet") {
+            return Some(name.to_string());
+        }
+    }
+    for line in services.lines().skip(1) {
+        if !line.starts_with('*') {
+            return Some(line.trim().to_string());
+        }
+    }
+    None
+}
+
+/// 设置系统 IPv6 状态
+/// 
+/// 在 TUN 模式下禁用 IPv6 以防止泄漏
+/// 断开时恢复 IPv6
+pub fn set_system_ipv6(enable: bool) {
+    let service_name = match get_active_network_service() {
+        Some(name) => name,
+        None => "Wi-Fi".to_string(),
+    };
+
+    if enable {
+        println!(">>> Enabling IPv6 on {}...", service_name);
+        let _ = Command::new("networksetup")
+            .args(["-setv6automatic", &service_name])
+            .output();
+    } else {
+        println!(">>> Disabling IPv6 on {} to prevent leaks...", service_name);
+        let _ = Command::new("networksetup")
+            .args(["-setv6off", &service_name])
+            .output();
+    }
 }

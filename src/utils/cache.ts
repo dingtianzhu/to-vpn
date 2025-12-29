@@ -115,7 +115,7 @@ export const CACHE_KEYS = {
 
 // 缓存 TTL 常量（毫秒）
 export const CACHE_TTL = {
-  SERVERS: 5 * 60 * 1000, // 5 分钟
+  SERVERS: 1 * 60 * 1000, // 1 分钟（从 5 分钟改为 1 分钟，提高实时性）
   USER_PROFILE: 10 * 60 * 1000, // 10 分钟
   USER_USAGE: 1 * 60 * 1000, // 1 分钟
 } as const

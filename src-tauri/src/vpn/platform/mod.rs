@@ -15,6 +15,10 @@ mod windows;
 #[cfg(target_os = "windows")]
 pub use windows::*;
 
+// 网络接口检测模块 - 跨平台
+pub mod interface;
+pub use interface::detect_active_interface;
+
 /// TUN 模式预检查结果
 #[derive(serde::Serialize, Clone)]
 pub struct TunPrecheck {

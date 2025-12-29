@@ -3,12 +3,13 @@
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use crate::constants::SINGBOX_PID_FILE;
+use crate::constants::get_singbox_pid_file;
 use super::TunPrecheck;
 
 /// 检查 sing-box 进程是否在运行
 pub fn is_singbox_running() -> bool {
-    if let Ok(pid_str) = fs::read_to_string(SINGBOX_PID_FILE) {
+    let pid_file = get_singbox_pid_file();
+    if let Ok(pid_str) = fs::read_to_string(&pid_file) {
         if let Ok(pid) = pid_str.trim().parse::<i32>() {
             return Command::new("kill")
                 .args(["-0", &pid.to_string()])
@@ -55,6 +56,7 @@ pub fn run_singbox_tun_as_root(config_path: &str, _log_file: &str) -> Result<(),
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
 
+    let pid_file = get_singbox_pid_file();
     let output = Command::new("pkexec")
         .args(["sing-box", "run", "-c", config_path])
         .spawn();
@@ -62,7 +64,7 @@ pub fn run_singbox_tun_as_root(config_path: &str, _log_file: &str) -> Result<(),
     match output {
         Ok(mut child) => {
             if let Some(pid) = child.id() {
-                let _ = fs::write(SINGBOX_PID_FILE, pid.to_string());
+                let _ = fs::write(&pid_file, pid.to_string());
             }
             std::thread::sleep(std::time::Duration::from_millis(1000));
             if is_singbox_running() {
@@ -77,10 +79,11 @@ pub fn run_singbox_tun_as_root(config_path: &str, _log_file: &str) -> Result<(),
 
 /// 停止 sing-box (TUN 模式)
 pub fn stop_singbox_tun_as_root() -> Result<(), String> {
-    if let Ok(pid_str) = fs::read_to_string(SINGBOX_PID_FILE) {
+    let pid_file = get_singbox_pid_file();
+    if let Ok(pid_str) = fs::read_to_string(&pid_file) {
         if let Ok(pid) = pid_str.trim().parse::<i32>() {
             let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).output();
-            let _ = fs::remove_file(SINGBOX_PID_FILE);
+            let _ = fs::remove_file(&pid_file);
         }
     }
 
@@ -114,10 +117,11 @@ pub fn restore_default_gateway() {
 
 /// 强制清理所有 TUN 相关资源
 pub fn force_cleanup() {
+    let pid_file = get_singbox_pid_file();
     if is_singbox_running() {
         let _ = stop_singbox_tun_as_root();
     }
-    let _ = fs::remove_file(SINGBOX_PID_FILE);
+    let _ = fs::remove_file(&pid_file);
     cleanup_tun_routes();
     restore_default_gateway();
 }
@@ -150,6 +154,44 @@ pub fn set_system_socks_proxy(enable: bool) {
 
     // 备用方案：设置环境变量（适用于终端应用）
     // 这需要用户手动 source 配置文件
+}
+
+/// 设置系统 HTTP 代理
+/// 
+/// **Feature: vpn-enhancement**
+/// **Validates: Requirements 1.2, 1.4**
+#[allow(dead_code)]
+pub fn set_system_http_proxy(enable: bool) {
+    if enable {
+        // 设置 HTTP 代理主机和端口
+        let _ = Command::new("gsettings")
+            .args(["set", "org.gnome.system.proxy.http", "host", "'127.0.0.1'"])
+            .output();
+
+        let _ = Command::new("gsettings")
+            .args(["set", "org.gnome.system.proxy.http", "port", "1087"])
+            .output();
+
+        // 设置 HTTPS 代理主机和端口
+        let _ = Command::new("gsettings")
+            .args(["set", "org.gnome.system.proxy.https", "host", "'127.0.0.1'"])
+            .output();
+
+        let _ = Command::new("gsettings")
+            .args(["set", "org.gnome.system.proxy.https", "port", "1087"])
+            .output();
+    }
+    // 禁用时由 set_system_socks_proxy 统一处理 mode 设置
+}
+
+/// 设置所有系统代理（SOCKS + HTTP）
+/// 
+/// **Feature: vpn-enhancement**
+/// **Validates: Requirements 1.2, 1.4 - 同时设置/清除 SOCKS 和 HTTP 代理**
+#[allow(dead_code)]
+pub fn set_system_proxy(enable: bool) {
+    set_system_socks_proxy(enable);
+    set_system_http_proxy(enable);
 }
 
 /// 检测桌面环境

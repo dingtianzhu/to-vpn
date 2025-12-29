@@ -6,6 +6,7 @@ pub mod monitor;
 pub mod ping;
 pub mod platform;
 pub mod proxy;
+pub mod ruleset;
 pub mod security;
 pub mod singbox;
 pub mod state;

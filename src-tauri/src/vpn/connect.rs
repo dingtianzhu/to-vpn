@@ -15,14 +15,14 @@ use tracing::{error, info, warn};
 use crate::constants::{self, get_cache_dir};
 use crate::error::{Result, VpnError};
 
-use super::config::ConnectConfig;
+use super::config::{ConfigOptions, ConnectConfig};
 use super::monitor::{
     emit_log, emit_status_change, start_monitor, start_process_watchdog, stop_monitor,
     stop_watchdog,
 };
 use super::platform;
 use super::security;
-use super::singbox::{is_fatal_error, parse_log_level};
+use super::singbox::{generate_config_with_options, is_fatal_error, parse_log_level};
 use super::state::{VpnState, VpnStatusEnum};
 
 #[derive(serde::Serialize)]
@@ -55,6 +55,12 @@ pub async fn connect_hysteria(
     mode: String,
     server_mtu: u16,
     server_dns: String,
+    // 高级配置选项
+    tcp_fast_open: Option<bool>,
+    up_mbps: Option<u32>,
+    down_mbps: Option<u32>,
+    block_quic: Option<bool>,
+    disable_ipv6: Option<bool>,
 ) -> std::result::Result<String, String> {
     let current_status = state.get_status();
     if current_status == VpnStatusEnum::Connected {
@@ -72,12 +78,24 @@ pub async fn connect_hysteria(
         return Err(e.user_message());
     }
 
+    // 创建高级配置选项
+    let options = ConfigOptions::new(
+        tcp_fast_open.unwrap_or(true),
+        up_mbps.unwrap_or(200),
+        down_mbps.unwrap_or(500),
+        block_quic.unwrap_or(true),
+        disable_ipv6.unwrap_or(true),
+    );
+    if let Err(e) = options.validate() {
+        return Err(e.user_message());
+    }
+
     state.set_user_disconnect(false);
     state.set_status(VpnStatusEnum::Connecting);
     emit_status_change(&app_handle, &state);
     state.set_server_id(Some(server_id));
 
-    match do_connect(&app_handle, &state, &config).await {
+    match do_connect(&app_handle, &state, &config, &options).await {
         Ok(_) => {
             state.set_status(VpnStatusEnum::Connected);
             state.set_connected_at(
@@ -154,7 +172,9 @@ fn fast_cleanup_before_connect(_app_handle: &AppHandle, state: &VpnState) {
     stop_watchdog(state);
     stop_monitor(state);
     
-    platform::set_system_socks_proxy(false);
+    // **Feature: vpn-enhancement**
+    // **Validates: Requirements 1.2, 1.4 - 同时清除 SOCKS 和 HTTP 代理**
+    platform::set_system_proxy(false);
     platform::force_cleanup();
     state.reset();
 
@@ -176,7 +196,13 @@ fn fast_cleanup_connection(app_handle: &AppHandle, state: &VpnState, is_user_act
     stop_watchdog(state);
     stop_monitor(state);
     
-    platform::set_system_socks_proxy(false);
+    // **Feature: vpn-enhancement**
+    // **Validates: Requirements 1.2, 1.4 - 同时清除 SOCKS 和 HTTP 代理**
+    platform::set_system_proxy(false);
+    
+    // 恢复系统 IPv6
+    #[cfg(target_os = "macos")]
+    platform::set_system_ipv6(true);
 
     let mode = state.get_current_mode();
 
@@ -256,6 +282,7 @@ async fn do_connect(
     app_handle: &AppHandle,
     state: &VpnState,
     config: &ConnectConfig,
+    options: &ConfigOptions,
 ) -> Result<()> {
     let app_dir = app_handle
         .path()
@@ -279,7 +306,7 @@ async fn do_connect(
     };
     let cache_path = app_dir.join(cache_filename);
 
-    let config_content = super::singbox::generate_config(config, &cache_path)?;
+    let config_content = generate_config_with_options(config, &cache_path, options)?;
 
     let config_json = serde_json::to_string_pretty(&config_content)
         .map_err(|e| VpnError::Config(format!("Serialize failed: {}", e)))?;
@@ -312,7 +339,16 @@ async fn do_connect(
     if config.mode == "tun" {
         info!("Starting TUN mode...");
 
-        platform::set_system_socks_proxy(false);
+        // **Feature: vpn-enhancement**
+        // **Validates: Requirements 1.2, 1.4 - TUN 模式不需要系统代理**
+        platform::set_system_proxy(false);
+        
+        // 根据用户设置禁用系统 IPv6 以防止泄漏
+        #[cfg(target_os = "macos")]
+        if options.disable_ipv6 {
+            platform::set_system_ipv6(false);
+        }
+        
         state.set_current_mode("tun");
 
         let log_path = get_cache_dir()
@@ -357,7 +393,9 @@ async fn do_connect(
         warn!("SOCKS proxy verification failed, but process seems running");
     }
 
-    platform::set_system_socks_proxy(true);
+    // **Feature: vpn-enhancement**
+    // **Validates: Requirements 1.2, 1.4 - 同时设置 SOCKS 和 HTTP 代理**
+    platform::set_system_proxy(true);
 
     let user_disconnect = state.get_user_disconnect_flag();
     let app = app_handle.clone();

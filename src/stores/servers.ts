@@ -6,6 +6,7 @@ import { getVpnNodes } from "@/api/server";
 import type { Server, ServerStatus, ServerNode } from "@/types/server";
 import { requestLock } from "@/utils/debounce";
 import { cache, CACHE_KEYS, CACHE_TTL } from "@/utils/cache";
+import { useVpnStore } from "@/stores/vpn";
 
 export type PendingAction = "connect" | "switch" | null;
 
@@ -126,6 +127,7 @@ export const useServersStore = defineStore("servers", () => {
 
   /**
    * 测试所有节点延迟（通过 Rust 批量测试）
+   * 智能延迟测试：VPN 已连接时通过代理测试，未连接时使用直接 TCP 测试
    */
   async function testAllPings() {
     if (servers.value.length === 0) return;
@@ -141,6 +143,11 @@ export const useServersStore = defineStore("servers", () => {
       let receivedCount = 0;
       const totalCount = servers.value.length;
       const receivedNodes = new Set<number>();
+
+      // 检查 VPN 连接状态，决定使用哪种测试方式
+      const vpnStore = useVpnStore();
+      const useProxy = vpnStore.isConnected;
+      console.log(`[Ping] Using ${useProxy ? 'proxy' : 'direct'} mode for latency test`);
 
       // 设置监听器接收 ping 结果（在调用 ping_nodes 之前）
       if (unlistenPing) {
@@ -195,8 +202,14 @@ export const useServersStore = defineStore("servers", () => {
 
         console.log(`[Ping] Starting batch ping for ${nodes.length} nodes:`, nodes);
 
-        // 调用 Rust 批量测试（这个调用会立即返回，结果通过事件发送）
-        await invoke("ping_nodes", { nodes });
+        // 根据 VPN 连接状态选择测试方式
+        if (useProxy) {
+          // VPN 已连接：通过代理测试真实延迟
+          await invoke("ping_nodes_via_proxy", { nodes });
+        } else {
+          // VPN 未连接：使用直接 TCP 测试
+          await invoke("ping_nodes", { nodes });
+        }
 
         // 设置超时，防止永远等待
         setTimeout(() => {
@@ -214,6 +227,7 @@ export const useServersStore = defineStore("servers", () => {
 
   /**
    * 测试单个节点延迟
+   * 智能延迟测试：VPN 已连接时通过代理测试，未连接时使用直接 TCP 测试
    */
   async function testSinglePing(serverId: number): Promise<number> {
     const serverIndex = servers.value.findIndex((s) => s.id === serverId);
@@ -221,11 +235,25 @@ export const useServersStore = defineStore("servers", () => {
 
     const server = servers.value[serverIndex];
 
+    // 检查 VPN 连接状态，决定使用哪种测试方式
+    const vpnStore = useVpnStore();
+    const useProxy = vpnStore.isConnected;
+
     try {
-      const latency = await invoke<number>("ping_single_node", {
-        domain: server.domain,
-        port: server.port || 443,
-      });
+      let latency: number;
+      if (useProxy) {
+        // VPN 已连接：通过代理测试真实延迟
+        latency = await invoke<number>("ping_single_node_via_proxy", {
+          domain: server.domain,
+          port: server.port || 443,
+        });
+      } else {
+        // VPN 未连接：使用直接 TCP 测试
+        latency = await invoke<number>("ping_single_node", {
+          domain: server.domain,
+          port: server.port || 443,
+        });
+      }
 
       const newPing = latency >= 0 ? latency : 999;
       const newStatus = latency >= 0 && latency < 500 ? "online" : "offline";

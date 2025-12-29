@@ -14,7 +14,7 @@ use tracing::info;
 
 use crate::constants;
 use crate::error::Result;
-use crate::vpn::config::ConnectConfig;
+use crate::vpn::config::{ConfigOptions, ConnectConfig};
 
 // 嵌入资源文件
 static GEOSITE_CN_SRS: &[u8] = include_bytes!(concat!(
@@ -33,17 +33,31 @@ pub struct RuleSetPaths {
 }
 
 /// 统一入口函数
+#[allow(dead_code)]
 pub fn generate_config(config: &ConnectConfig, cache_path: &Path) -> Result<Value> {
-    info!(">>> generate_config (Split Module Mode) <<<");
+    // 使用默认配置选项
+    generate_config_with_options(config, cache_path, &ConfigOptions::default())
+}
+
+/// 统一入口函数（带高级选项）
+/// 
+/// **Feature: vpn-optimization**
+/// **Validates: Requirements - 配置参数分析**
+pub fn generate_config_with_options(
+    config: &ConnectConfig,
+    cache_path: &Path,
+    options: &ConfigOptions,
+) -> Result<Value> {
+    info!(">>> generate_config_with_options (Split Module Mode) <<<");
 
     // 确保规则集存在 (公共逻辑)
     let base_dir = cache_path.parent().unwrap_or(Path::new(".")).to_path_buf();
     let ruleset_paths = ensure_local_rulesets(&base_dir)?;
 
     if config.mode == "tun" {
-        tun::generate(config, cache_path, ruleset_paths)
+        tun::generate_with_options(config, cache_path, ruleset_paths, options)
     } else {
-        socks::generate(config, cache_path, ruleset_paths)
+        socks::generate_with_options(config, cache_path, ruleset_paths, options)
     }
 }
 
@@ -94,6 +108,147 @@ pub fn resolve_ipv4(host: &str, port: u16) -> Vec<IpAddr> {
         }
     }
     out
+}
+
+/// 获取常见国内 CDN 域名列表
+/// 
+/// **Feature: vpn-optimization**
+/// **Validates: Requirements 5.1, 5.2, 7.1**
+/// 
+/// 这些域名应直连不经过代理，以保护节点纯净度
+pub fn get_china_cdn_domains() -> Vec<&'static str> {
+    vec![
+        // 阿里云 CDN
+        ".aliyuncs.com",
+        ".alicdn.com",
+        ".aliyun.com",
+        ".alibabacloud.com",
+        ".alipay.com",
+        ".alipayobjects.com",
+        ".taobao.com",
+        ".tmall.com",
+        ".tbcdn.cn",
+        ".aliapp.org",
+        ".alibaba.com",
+        // 腾讯云 CDN
+        ".qcloud.com",
+        ".tencent.com",
+        ".qq.com",
+        ".gtimg.cn",
+        ".gtimg.com",
+        ".qpic.cn",
+        ".myqcloud.com",
+        ".tencent-cloud.net",
+        ".tencentcs.com",
+        ".weixin.qq.com",
+        ".wechat.com",
+        // 百度云 CDN
+        ".baidubce.com",
+        ".bcebos.com",
+        ".bdstatic.com",
+        ".bdimg.com",
+        ".baidu.com",
+        ".baidustatic.com",
+        ".bdydns.com",
+        // 华为云 CDN
+        ".huaweicloud.com",
+        ".myhuaweicloud.com",
+        ".hwcdn.net",
+        ".huawei.com",
+        // 京东云 CDN
+        ".jdcloud.com",
+        ".jd.com",
+        ".jcloudcs.com",
+        ".360buyimg.com",
+        // 网易云 CDN
+        ".163.com",
+        ".126.com",
+        ".netease.com",
+        ".ydstatic.com",
+        ".nosdn.127.net",
+        // 七牛云 CDN
+        ".qiniucdn.com",
+        ".qiniudn.com",
+        ".qbox.me",
+        ".qnssl.com",
+        // 又拍云 CDN
+        ".upaiyun.com",
+        ".upyun.com",
+        // 金山云 CDN
+        ".ksyun.com",
+        ".ks-cdn.com",
+        // 字节跳动/抖音 CDN
+        ".bytedance.com",
+        ".bytecdn.cn",
+        ".bytegoofy.com",
+        ".byteimg.com",
+        ".toutiao.com",
+        ".douyin.com",
+        ".douyincdn.com",
+        ".pstatp.com",
+        ".snssdk.com",
+        // 快手 CDN
+        ".kuaishou.com",
+        ".gifshow.com",
+        ".yximgs.com",
+        // 哔哩哔哩 CDN
+        ".bilibili.com",
+        ".bilivideo.com",
+        ".biliapi.net",
+        ".hdslb.com",
+        // 新浪/微博 CDN
+        ".sina.com.cn",
+        ".sinaimg.cn",
+        ".weibo.com",
+        ".weibocdn.com",
+        // 搜狐 CDN
+        ".sohu.com",
+        ".sohucs.com",
+        ".itc.cn",
+        // 优酷/土豆 CDN
+        ".youku.com",
+        ".ykimg.com",
+        ".tudou.com",
+        // 爱奇艺 CDN
+        ".iqiyi.com",
+        ".iqiyipic.com",
+        ".qy.net",
+        // 其他常见国内服务
+        ".cctv.com",
+        ".csdn.net",
+        ".zhihu.com",
+        ".zhimg.com",
+        ".jianshu.com",
+        ".xiaomi.com",
+        ".miui.com",
+        ".mi.com",
+        ".oppo.com",
+        ".vivo.com",
+        ".meizu.com",
+        ".hupu.com",
+        ".meituan.com",
+        ".dianping.com",
+        ".ele.me",
+        ".ctrip.com",
+        ".qunar.com",
+        ".58.com",
+        ".anjuke.com",
+        ".lianjia.com",
+        ".ke.com",
+        ".pinduoduo.com",
+        ".yangkeduo.com",
+        ".suning.com",
+        ".gome.com.cn",
+        ".dangdang.com",
+        ".vip.com",
+        ".kaola.com",
+        ".ximalaya.com",
+        ".lizhi.fm",
+        ".kugou.com",
+        ".kuwo.cn",
+        ".music.163.com",
+        ".y.qq.com",
+    ]
 }
 
 /// 选择 DNS helper

@@ -1,0 +1,189 @@
+# Implementation Plan
+
+- [x] 1. 紧急修复 - SOCKS 模式 TCP Fast Open
+- [x] 1.1 修复 SOCKS 模式缺失 tcp_fast_open
+  - 修改 `src-tauri/src/vpn/singbox/socks.rs`
+  - 在 Hysteria2 outbound 配置中添加 `"tcp_fast_open": true`
+  - _Requirements: 延迟优化_
+- [x] 1.2 编写 Property 13: TCP Fast Open 配置测试
+  - **Property 13: TCP Fast Open 配置**
+  - 验证 TUN 和 SOCKS 模式配置都包含 tcp_fast_open
+  - **Validates: Requirements - 延迟优化**
+
+- [x] 2. 动态网络接口检测
+- [x] 2.1 创建网络接口检测模块
+  - 创建 `src-tauri/src/vpn/platform/interface.rs`
+  - 实现 `detect_active_interface()` 函数
+  - 实现 `list_all_interfaces()` 函数
+  - _Requirements: 1.1, 1.2, 6.1_34556785
+- [x] 2.2 修改 TUN 配置生成使用动态接口
+  - 修改 `src-tauri/src/vpn/singbox/tun.rs`
+  - 移除硬编码的 `bind_interface: "en0"`
+  - 调用 `detect_active_interface()` 获取接口名
+  - 检测失败时回退到 `auto_detect_interface` 模式
+  - _Requirements: 1.3, 6.2, 6.3_
+- [x] 2.3 编写 Property 1-3: 网络接口检测测试
+  - **Property 1: 网络接口检测正确性**
+  - **Property 2: 接口检测回退逻辑**
+  - **Property 3: TUN 配置接口绑定**
+  - **Validates: Requirements 1.1, 1.2, 1.3, 6.1, 6.2, 6.3**
+
+- [x] 3. Checkpoint - 确保核心修复测试通过
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [x] 4. 前端设置类型扩展
+- [x] 4.1 更新 VpnSettings 类型定义
+  - 修改 `src/types/vpn.ts`
+  - 移除未实现的 `killSwitch` 字段
+  - 添加新字段: `enableTcpFastOpen`, `upMbps`, `downMbps`, `blockQuic`
+  - _Requirements: 配置参数分析_
+- [x] 4.2 更新 settings store 默认值
+  - 修改 `src/stores/settings.ts`
+  - 添加新字段的默认值
+  - 确保向后兼容（旧配置迁移）
+  - _Requirements: 配置参数分析_
+- [x] 4.3 编写 Property 4: 设置持久化往返一致性测试
+  - **Property 4: 设置持久化往返一致性**
+  - 验证设置保存和读取的一致性
+  - **Validates: Requirements 2.4**
+
+- [x] 5. 高级网络设置 UI
+- [x] 5.1 创建高级网络设置组件
+  - 创建 `src/components/settings/AdvancedNetworkSection.vue`
+  - 添加 TCP Fast Open 开关
+  - 添加带宽限制设置 (upMbps/downMbps)
+  - 添加 QUIC 阻断开关
+  - _Requirements: 配置参数分析_
+- [x] 5.2 集成高级设置到 SettingsView
+  - 修改 `src/views/SettingsView.vue`
+  - 添加 AdvancedNetworkSection 组件
+  - 添加设置变更时的重连逻辑
+  - _Requirements: 配置参数分析_
+
+- [x] 6. 后端配置生成器更新
+- [x] 6.1 创建配置选项结构
+  - 修改 `src-tauri/src/vpn/config.rs`
+  - 添加 `ConfigOptions` 结构体
+  - 包含: tcp_fast_open, up_mbps, down_mbps, block_quic
+  - _Requirements: 配置参数分析_
+- [x] 6.2 更新 TUN 配置生成器
+  - 修改 `src-tauri/src/vpn/singbox/tun.rs`
+  - 使用 ConfigOptions 中的参数
+  - 支持动态带宽限制
+  - 支持 QUIC 阻断开关
+  - _Requirements: 配置参数分析_
+- [x] 6.3 更新 SOCKS 配置生成器
+  - 修改 `src-tauri/src/vpn/singbox/socks.rs`
+  - 使用 ConfigOptions 中的参数
+  - 保持与 TUN 配置一致
+  - _Requirements: 配置参数分析_
+- [x] 6.4 更新 connect_hysteria 命令
+  - 修改 `src-tauri/src/vpn/connect.rs`
+  - 接收新的配置参数
+  - 传递给配置生成器
+  - _Requirements: 配置参数分析_
+
+- [x] 7. Checkpoint - 确保配置参数测试通过
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [x] 8. 路由规则增强
+- [x] 8.1 添加常见国内 CDN 域名白名单
+  - 修改 `src-tauri/src/vpn/singbox/tun.rs` 和 `socks.rs`
+  - 添加常见国内 CDN 域名直连规则
+  - 包括: *.aliyuncs.com, *.qcloud.com, *.baidubce.com 等
+  - _Requirements: 5.1, 5.2, 7.1_
+- [x] 8.2 编写 Property 4-5: 路由规则测试
+  - **Property 4: 路由规则完整性**
+  - **Property 5: DNS 规则正确性**
+  - 验证配置包含所有必要的直连规则
+  - **Validates: Requirements 5.1, 5.2, 4.1, 4.2, 7.1**
+
+- [x] 9. IPv6 禁用确认
+- [x] 9.1 确认 TUN 配置仅使用 IPv4
+  - 检查 `src-tauri/src/vpn/singbox/tun.rs`
+  - 确保 TUN 地址仅包含 IPv4 CIDR
+  - 确保 DNS 策略为 ipv4_only
+  - _Requirements: 问题 6_
+- [x] 9.2 编写 Property 11: IPv4 Only 策略测试
+  - **Property 11: IPv4 Only 策略**
+  - 验证配置不包含 IPv6 地址
+  - **Validates: Requirements - IPv6 禁用**
+
+- [x] 10. 延迟监控增强
+- [x] 10.1 创建延迟监控模块
+  - 创建 `src/stores/vpn/useLatencyMonitor.ts`
+  - 实现 LatencyMetrics 数据结构
+  - 实现 min/max/avg/jitter 计算
+  - 实现异常检测逻辑
+  - _Requirements: 问题 7_
+- [x] 10.2 集成延迟监控到 VPN Store
+  - 修改 `src/stores/vpn.ts`
+  - 添加延迟监控子模块
+  - 在连接时启动监控
+  - 在断开时停止监控
+  - _Requirements: 问题 7_
+- [x] 10.3 编写 Property 12: 延迟监控数据完整性测试
+  - **Property 12: 延迟监控数据完整性**
+  - 验证监控数据包含所有必要字段
+  - **Validates: Requirements - 延迟优化**
+
+- [x] 11. Checkpoint - 确保延迟监控测试通过
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [x] 12. 模式切换优化
+- [x] 12.1 创建模式切换器模块
+  - 创建 `src/stores/vpn/useModeSwitcher.ts`
+  - 实现 ModeSwitchState 状态机
+  - 实现 switchMode() 方法
+  - 实现 rollback() 回退方法
+  - _Requirements: 3.1, 3.2, 3.3_
+- [x] 12.2 集成模式切换器到 VPN Store
+  - 修改 `src/stores/vpn.ts`
+  - 添加模式切换子模块
+  - 暴露 switchMode 方法
+  - _Requirements: 3.1, 3.2, 3.3_
+- [x] 12.3 更新设置页面使用模式切换器
+  - 修改 `src/components/settings/ConnectionModeSection.vue`
+  - 使用 switchMode 替代直接设置
+  - 显示切换进度状态
+  - _Requirements: 3.1, 3.2_
+- [x] 12.4 编写 Property 6-7: 模式切换测试
+  - **Property 6: 模式切换状态机正确性**
+  - **Property 7: 模式切换回退逻辑**
+  - **Validates: Requirements 3.1, 3.2, 3.3, 8.1, 8.2, 8.3**
+
+- [x] 13. 规则集管理器
+- [x] 13.1 创建规则集管理模块
+  - 创建 `src-tauri/src/vpn/ruleset.rs`
+  - 实现 RulesetInfo 结构体
+  - 实现 check_ruleset_status() 函数
+  - 实现 needs_update() 函数 (7 天检查)
+  - _Requirements: 5.3, 7.2, 7.3_
+- [x] 13.2 添加规则集状态检查命令
+  - 修改 `src-tauri/src/lib.rs`
+  - 添加 check_ruleset_status Tauri 命令
+  - 添加 update_ruleset Tauri 命令
+  - _Requirements: 5.3, 7.2, 7.3_
+- [x] 13.3 创建规则集状态 UI 组件
+  - 创建 `src/components/settings/RulesetStatusSection.vue`
+  - 显示规则集版本和更新时间
+  - 添加手动更新按钮
+  - 显示更新提示
+  - _Requirements: 5.3, 7.3_
+- [x] 13.4 编写 Property 8: 规则集版本检查测试
+  - **Property 8: 规则集版本检查**
+  - 验证超过 7 天的规则集返回 needs_update = true
+  - **Validates: Requirements 5.3, 7.3**
+
+- [x] 14. 流量统计完整性
+- [x] 14.1 验证流量统计上报数据
+  - 检查 `src/stores/vpn.ts` 中的 reportCurrentUsage
+  - 确保包含所有必要字段
+  - _Requirements: 9.1, 9.3_
+- [x] 14.2 编写 Property 9: 流量统计完整性测试
+  - **Property 9: 流量统计完整性**
+  - 验证上报数据包含: node_id, traffic_download, traffic_upload, duration, connected_at, disconnected_at
+  - **Validates: Requirements 9.1, 9.3**
+
+- [x] 15. Final Checkpoint - 确保所有测试通过
+  - Ensure all tests pass, ask the user if questions arise.

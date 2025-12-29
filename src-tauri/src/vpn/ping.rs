@@ -2,7 +2,9 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use serde::Serialize;
-use tracing::debug;
+use tracing::{debug, info};
+
+use crate::constants::DEFAULT_SOCKS_PORT;
 
 /// Ping 结果
 #[derive(Clone, Serialize)]
@@ -87,4 +89,73 @@ pub async fn ping_nodes(
 #[tauri::command]
 pub fn ping_single_node(domain: String, port: u16) -> i32 {
     tcp_ping(&domain, port, 5000)
+}
+
+/// 通过 SOCKS 代理测试节点延迟
+/// 用于 VPN 已连接时测试服务器延迟
+async fn tcp_ping_via_proxy(host: &str, port: u16, timeout_ms: u64) -> i32 {
+    use tokio::time::timeout;
+    use tokio_socks::tcp::Socks5Stream;
+    
+    let proxy_addr = format!("127.0.0.1:{}", DEFAULT_SOCKS_PORT);
+    let target_addr = format!("{}:{}", host, port);
+    
+    let start = Instant::now();
+    
+    let connect_future = async {
+        Socks5Stream::connect(proxy_addr.as_str(), target_addr.as_str()).await
+    };
+    
+    match timeout(Duration::from_millis(timeout_ms), connect_future).await {
+        Ok(Ok(_)) => start.elapsed().as_millis() as i32,
+        Ok(Err(e)) => {
+            debug!("Proxy ping failed for {}:{}: {}", host, port, e);
+            -1
+        }
+        Err(_) => {
+            debug!("Proxy ping timeout for {}:{}", host, port);
+            -1
+        }
+    }
+}
+
+/// 批量测试节点延迟（通过代理）
+/// 用于 VPN 已连接时测试服务器延迟
+#[tauri::command]
+pub async fn ping_nodes_via_proxy(
+    app_handle: AppHandle,
+    nodes: Vec<(i32, String, u16)>,  // (id, domain, port)
+) -> Result<(), String> {
+    info!(count = nodes.len(), "Starting batch ping via proxy");
+    
+    // 使用 tokio 并发测试
+    let handles: Vec<_> = nodes.into_iter().map(|(id, domain, port)| {
+        let app = app_handle.clone();
+        tokio::spawn(async move {
+            let latency = tcp_ping_via_proxy(&domain, port, 5000).await;
+            let status = get_status_from_latency(latency);
+            
+            let result = PingResult {
+                node_id: id,
+                latency_ms: latency,
+                status: status.to_string(),
+            };
+            
+            // 发送单个节点的结果
+            let _ = app.emit("ping-result", result);
+        })
+    }).collect();
+    
+    // 等待所有测试完成
+    for handle in handles {
+        let _ = handle.await;
+    }
+    
+    Ok(())
+}
+
+/// 测试单个节点延迟（通过代理）
+#[tauri::command]
+pub async fn ping_single_node_via_proxy(domain: String, port: u16) -> i32 {
+    tcp_ping_via_proxy(&domain, port, 5000).await
 }

@@ -5,13 +5,32 @@ use std::net::IpAddr;
 use std::path::Path;
 use tracing::info;
 
-use super::{pick_remote_dns_address, resolve_ipv4, RuleSetPaths};
-use crate::constants::{self, DEFAULT_SOCKS_PORT, SINGBOX_API_PORT_SOCKS};
+use super::{get_china_cdn_domains, pick_remote_dns_address, resolve_ipv4, RuleSetPaths};
+use crate::constants::{self, DEFAULT_HTTP_PORT, DEFAULT_SOCKS_PORT, SINGBOX_API_PORT_SOCKS};
 use crate::error::Result;
-use crate::vpn::config::ConnectConfig;
+use crate::vpn::config::{ConfigOptions, ConnectConfig};
 
+/// 生成 SOCKS 模式配置
+/// 
+/// **Feature: vpn-optimization**
+/// **Validates: Requirements - 配置参数分析**
+#[allow(dead_code)]
 pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths) -> Result<Value> {
-    info!(">>> Generating SOCKS config <<<");
+    // 使用默认配置选项
+    generate_with_options(config, cache_path, ruleset, &ConfigOptions::default())
+}
+
+/// 生成 SOCKS 模式配置（带高级选项）
+/// 
+/// **Feature: vpn-optimization**
+/// **Validates: Requirements - 配置参数分析**
+pub fn generate_with_options(
+    config: &ConnectConfig,
+    cache_path: &Path,
+    ruleset: RuleSetPaths,
+    options: &ConfigOptions,
+) -> Result<Value> {
+    info!(">>> Generating SOCKS config with options: {:?} <<<", options);
 
     // 1. 解析 IP
     let server_ips: Vec<IpAddr> = match config.server_host.parse::<IpAddr>() {
@@ -25,15 +44,27 @@ pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths
         .map(|ip| ip.to_string())
         .unwrap_or_else(|| config.server_host.clone());
 
-    // 2. Inbounds (SOCKS 特有)
-    let inbounds = json!([{
-        "type": "socks",
-        "tag": "socks-in",
-        "listen": "127.0.0.1",
-        "listen_port": DEFAULT_SOCKS_PORT,
-        "sniff": true,
-        "sniff_override_destination": true
-    }]);
+    // 2. Inbounds (SOCKS + HTTP 代理)
+    // **Feature: vpn-enhancement**
+    // **Validates: Requirements 1.1 - 同时启动 SOCKS (1080) 和 HTTP (1087) 代理端口**
+    let inbounds = json!([
+        {
+            "type": "socks",
+            "tag": "socks-in",
+            "listen": "127.0.0.1",
+            "listen_port": DEFAULT_SOCKS_PORT,
+            "sniff": true,
+            "sniff_override_destination": true
+        },
+        {
+            "type": "http",
+            "tag": "http-in",
+            "listen": "127.0.0.1",
+            "listen_port": DEFAULT_HTTP_PORT,
+            "sniff": true,
+            "sniff_override_destination": true
+        }
+    ]);
 
     // 3. DNS (复刻原文件逻辑，保持一致)
     let local_dns_addr = constants::dns::ALIYUN_UDP;
@@ -62,8 +93,10 @@ pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths
     route_rules.push(
         json!({ "domain_suffix": [".lan", ".local", ".home", ".internal"], "outbound": "direct" }),
     );
-    // 屏蔽 QUIC (UDP 443)
-    route_rules.push(json!({ "port": 443, "network": "udp", "action": "reject" }));
+    // 屏蔽 QUIC (UDP 443) - 根据配置选项决定
+    if options.block_quic {
+        route_rules.push(json!({ "port": 443, "network": "udp", "action": "reject" }));
+    }
 
     if !server_ips.is_empty() {
         let cidrs: Vec<String> = server_ips
@@ -76,6 +109,13 @@ pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths
         }
     }
 
+    // 常见国内 CDN 域名直连 (提高节点纯净度)
+    // **Feature: vpn-optimization**
+    // **Validates: Requirements 5.1, 5.2, 7.1**
+    route_rules.push(json!({
+        "domain_suffix": get_china_cdn_domains(),
+        "outbound": "direct"
+    }));
     route_rules.push(json!({ "rule_set": "geosite-cn", "outbound": "direct" }));
     route_rules.push(json!({ "rule_set": "geoip-cn", "outbound": "direct" }));
     route_rules.push(json!({ "ip_is_private": true, "outbound": "direct" }));
@@ -87,8 +127,9 @@ pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths
         "server": hysteria_server,
         "server_port": config.server_port,
         "password": config.password,
-        "up_mbps": 200,
-        "down_mbps": 500,
+        "up_mbps": options.up_mbps,
+        "down_mbps": options.down_mbps,
+        "tcp_fast_open": options.tcp_fast_open,
         "tls": {
             "enabled": true,
             "alpn": ["h3"],
