@@ -16,6 +16,9 @@ use crate::constants;
 use crate::error::Result;
 use crate::vpn::config::{ConfigOptions, ConnectConfig};
 
+// Re-export ProxyPorts for external use
+pub use socks::ProxyPorts;
+
 // 嵌入资源文件
 static GEOSITE_CN_SRS: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -48,7 +51,21 @@ pub fn generate_config_with_options(
     cache_path: &Path,
     options: &ConfigOptions,
 ) -> Result<Value> {
-    info!(">>> generate_config_with_options (Split Module Mode) <<<");
+    // 使用默认端口
+    generate_config_with_ports(config, cache_path, options, &ProxyPorts::default())
+}
+
+/// 统一入口函数（带高级选项和自定义端口）
+/// 
+/// **Feature: vpn-pure-mode**
+/// **Validates: Requirements 1.5**
+pub fn generate_config_with_ports(
+    config: &ConnectConfig,
+    cache_path: &Path,
+    options: &ConfigOptions,
+    ports: &ProxyPorts,
+) -> Result<Value> {
+    info!(">>> generate_config_with_ports (Split Module Mode) <<<");
 
     // 确保规则集存在 (公共逻辑)
     let base_dir = cache_path.parent().unwrap_or(Path::new(".")).to_path_buf();
@@ -57,7 +74,7 @@ pub fn generate_config_with_options(
     if config.mode == "tun" {
         tun::generate_with_options(config, cache_path, ruleset_paths, options)
     } else {
-        socks::generate_with_options(config, cache_path, ruleset_paths, options)
+        socks::generate_with_ports(config, cache_path, ruleset_paths, options, ports)
     }
 }
 
@@ -248,6 +265,152 @@ pub fn get_china_cdn_domains() -> Vec<&'static str> {
         ".kuwo.cn",
         ".music.163.com",
         ".y.qq.com",
+    ]
+}
+
+/// 获取 DNS 泄漏检测域名列表
+/// 
+/// **Feature: vpn-pure-mode**
+/// **Validates: Requirements 4.2, 4.3**
+/// 
+/// 这些域名用于 DNS 泄漏检测，必须通过远程 DNS 解析
+/// 以防止泄露用户真实 IP 地址
+pub fn get_dns_leak_test_domains() -> Vec<&'static str> {
+    vec![
+        // DNS 泄漏检测网站
+        "dnsleaktest.com",
+        ".dnsleaktest.com",
+        "dnsleak.com",
+        ".dnsleak.com",
+        "ipleak.net",
+        ".ipleak.net",
+        "ipleak.org",
+        ".ipleak.org",
+        "browserleaks.com",
+        ".browserleaks.com",
+        "browserleaks.org",
+        ".browserleaks.org",
+        "whoer.net",
+        ".whoer.net",
+        "whatismyip.com",
+        ".whatismyip.com",
+        "whatismyipaddress.com",
+        ".whatismyipaddress.com",
+        "ipinfo.io",
+        ".ipinfo.io",
+        "ip-api.com",
+        ".ip-api.com",
+        "ipify.org",
+        ".ipify.org",
+        "icanhazip.com",
+        ".icanhazip.com",
+        "checkip.amazonaws.com",
+        ".checkip.amazonaws.com",
+        "myip.com",
+        ".myip.com",
+        "ip.sb",
+        ".ip.sb",
+        "ip.cn",
+        ".ip.cn",
+        "cip.cc",
+        ".cip.cc",
+        "ipaddress.com",
+        ".ipaddress.com",
+        "ip138.com",
+        ".ip138.com",
+        "ip.tool.chinaz.com",
+        ".tool.chinaz.com",
+        // WebRTC 泄漏检测
+        "webrtc-ips.com",
+        ".webrtc-ips.com",
+        // 其他隐私检测工具
+        "mullvad.net",
+        ".mullvad.net",
+        "perfect-privacy.com",
+        ".perfect-privacy.com",
+        "expressvpn.com",
+        ".expressvpn.com",
+        "nordvpn.com",
+        ".nordvpn.com",
+    ]
+}
+
+/// 获取 WebRTC 相关域名列表
+/// 
+/// **Feature: vpn-pure-mode**
+/// **Validates: Requirements 6.2, 6.3**
+/// 
+/// 这些域名是 WebRTC STUN/TURN 服务器域名，阻断它们可以防止 WebRTC 泄露真实 IP
+pub fn get_webrtc_domains() -> Vec<&'static str> {
+    vec![
+        // Google STUN/TURN 服务器
+        "stun.l.google.com",
+        ".stun.l.google.com",
+        "stun1.l.google.com",
+        "stun2.l.google.com",
+        "stun3.l.google.com",
+        "stun4.l.google.com",
+        "stun.services.mozilla.com",
+        ".stun.services.mozilla.com",
+        // Twilio STUN/TURN
+        "global.stun.twilio.com",
+        ".stun.twilio.com",
+        ".turn.twilio.com",
+        // 其他常见 STUN 服务器
+        "stun.stunprotocol.org",
+        "stun.voip.eutelia.it",
+        "stun.sipgate.net",
+        "stun.ekiga.net",
+        "stun.ideasip.com",
+        "stun.schlund.de",
+        "stun.voiparound.com",
+        "stun.voipbuster.com",
+        "stun.voipstunt.com",
+        "stun.counterpath.com",
+        "stun.1und1.de",
+        "stun.gmx.net",
+        "stun.callwithus.com",
+        "stun.internetcalls.com",
+        // WebRTC 泄漏检测网站
+        "webrtc-ips.com",
+        ".webrtc-ips.com",
+    ]
+}
+
+/// 获取 WebRTC STUN/TURN 端口列表
+/// 
+/// **Feature: vpn-pure-mode**
+/// **Validates: Requirements 6.2**
+/// 
+/// 标准 STUN/TURN 端口：
+/// - 3478: STUN/TURN 标准端口
+/// - 5349: STUN/TURN over TLS
+/// - 19302: Google STUN 服务器端口
+pub fn get_webrtc_ports() -> Vec<u16> {
+    vec![3478, 5349, 19302]
+}
+
+/// 获取 LAN 绕过 CIDR 范围列表
+/// 
+/// **Feature: vpn-pure-mode**
+/// **Validates: Requirements 9.2, 9.3, 9.4**
+/// 
+/// 包含所有 RFC1918 私有地址范围和 link-local 地址：
+/// - 10.0.0.0/8: Class A 私有网络
+/// - 172.16.0.0/12: Class B 私有网络 (172.16.0.0 - 172.31.255.255)
+/// - 192.168.0.0/16: Class C 私有网络
+/// - 169.254.0.0/16: Link-local 地址 (APIPA)
+/// - 127.0.0.0/8: Loopback 地址
+pub fn get_lan_bypass_cidrs() -> Vec<&'static str> {
+    vec![
+        // RFC1918 私有地址范围
+        "10.0.0.0/8",       // Class A 私有网络
+        "172.16.0.0/12",    // Class B 私有网络
+        "192.168.0.0/16",   // Class C 私有网络
+        // Link-local 地址
+        "169.254.0.0/16",   // APIPA (Automatic Private IP Addressing)
+        // Loopback 地址
+        "127.0.0.0/8",      // Localhost
     ]
 }
 

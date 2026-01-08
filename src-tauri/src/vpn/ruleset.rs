@@ -7,12 +7,18 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::info;
+use tracing::{info, error};
 
 /// 规则集更新检查阈值（7 天）
 const RULESET_UPDATE_THRESHOLD_DAYS: u64 = 7;
+
+/// 规则集下载 URL
+/// 注意：sing-box 1.8+ 使用 rule_set 格式（.srs），需要从 rule-set 分支下载
+const GEOSITE_CN_URL: &str = "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs";
+const GEOIP_CN_URL: &str = "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs";
 
 /// 规则集信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -275,6 +281,160 @@ pub fn get_ruleset_paths() -> (PathBuf, PathBuf) {
         ruleset_dir.join("geosite-cn.srs"),
         ruleset_dir.join("geoip-cn.srs"),
     )
+}
+
+/// 规则集更新结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RulesetUpdateResult {
+    /// 是否成功
+    pub success: bool,
+    /// 更新的规则集数量
+    pub updated_count: u32,
+    /// 错误信息（如果有）
+    pub error: Option<String>,
+    /// 更新后的状态
+    pub status: Option<RulesetStatus>,
+}
+
+/// 下载单个规则集文件
+async fn download_ruleset(url: &str, path: &Path) -> Result<(), String> {
+    info!("Starting download from: {}", url);
+    info!("Target path: {:?}", path);
+    
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+    
+    info!("Sending HTTP request...");
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to download: {}", e))?;
+    
+    let status = response.status();
+    info!("HTTP response status: {}", status);
+    
+    if !status.is_success() {
+        return Err(format!("HTTP error: {}", status));
+    }
+    
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+    
+    info!("Downloaded {} bytes", bytes.len());
+    
+    // 验证文件大小（至少 1KB）
+    if bytes.len() < 1024 {
+        return Err(format!("Downloaded file is too small: {} bytes", bytes.len()));
+    }
+    
+    // 确保目录存在
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+    
+    // 写入临时文件
+    let temp_path = path.with_extension("srs.tmp");
+    info!("Writing to temp file: {:?}", temp_path);
+    
+    let mut file = fs::File::create(&temp_path)
+        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+    
+    file.write_all(&bytes)
+        .map_err(|e| format!("Failed to write file: {}", e))?;
+    
+    file.flush()
+        .map_err(|e| format!("Failed to flush file: {}", e))?;
+    
+    // 原子性地替换文件
+    info!("Renaming temp file to: {:?}", path);
+    fs::rename(&temp_path, path)
+        .map_err(|e| format!("Failed to rename file: {}", e))?;
+    
+    info!("Successfully downloaded ruleset to: {:?} ({} bytes)", path, bytes.len());
+    Ok(())
+}
+
+/// 更新规则集
+/// 
+/// 从 GitHub 下载最新的规则集文件
+pub async fn update_rulesets() -> RulesetUpdateResult {
+    info!("Starting ruleset update...");
+    
+    let ruleset_dir = get_ruleset_dir();
+    info!("Ruleset directory: {:?}", ruleset_dir);
+    
+    // 确保目录存在
+    if let Err(e) = fs::create_dir_all(&ruleset_dir) {
+        error!("Failed to create ruleset directory: {}", e);
+        return RulesetUpdateResult {
+            success: false,
+            updated_count: 0,
+            error: Some(format!("Failed to create directory: {}", e)),
+            status: None,
+        };
+    }
+    
+    let geosite_cn_path = ruleset_dir.join("geosite-cn.srs");
+    let geoip_cn_path = ruleset_dir.join("geoip-cn.srs");
+    
+    info!("Will download geosite-cn to: {:?}", geosite_cn_path);
+    info!("Will download geoip-cn to: {:?}", geoip_cn_path);
+    
+    let mut updated_count = 0u32;
+    let mut errors = Vec::new();
+    
+    // 下载 geosite-cn (域名规则集)
+    info!("Downloading geosite-cn from: {}", GEOSITE_CN_URL);
+    match download_ruleset(GEOSITE_CN_URL, &geosite_cn_path).await {
+        Ok(_) => {
+            updated_count += 1;
+            info!("geosite-cn (domain ruleset) updated successfully");
+        }
+        Err(e) => {
+            error!("Failed to update geosite-cn: {}", e);
+            errors.push(format!("geosite-cn: {}", e));
+        }
+    }
+    
+    // 下载 geoip-cn (IP 规则集)
+    info!("Downloading geoip-cn from: {}", GEOIP_CN_URL);
+    match download_ruleset(GEOIP_CN_URL, &geoip_cn_path).await {
+        Ok(_) => {
+            updated_count += 1;
+            info!("geoip-cn (IP ruleset) updated successfully");
+        }
+        Err(e) => {
+            error!("Failed to update geoip-cn: {}", e);
+            errors.push(format!("geoip-cn: {}", e));
+        }
+    }
+    
+    info!("Ruleset update completed: {} of 2 updated", updated_count);
+    
+    // 获取更新后的状态
+    let status = check_ruleset_status();
+    
+    if errors.is_empty() {
+        RulesetUpdateResult {
+            success: true,
+            updated_count,
+            error: None,
+            status: Some(status),
+        }
+    } else {
+        RulesetUpdateResult {
+            success: updated_count > 0,
+            updated_count,
+            error: Some(errors.join("; ")),
+            status: Some(status),
+        }
+    }
 }
 
 #[cfg(test)]

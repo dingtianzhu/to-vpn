@@ -34,6 +34,14 @@ interface RulesetStatus {
   checked_at: number
 }
 
+// 规则集更新结果类型
+interface RulesetUpdateResult {
+  success: boolean
+  updated_count: number
+  error: string | null
+  status: RulesetStatus | null
+}
+
 const i18nStore = useI18nStore()
 const notification = useNotification()
 
@@ -42,11 +50,11 @@ const { locale } = storeToRefs(i18nStore)
 // 状态
 const rulesetStatus = ref<RulesetStatus | null>(null)
 const isLoading = ref(false)
-const isChecking = ref(false)
+const isUpdating = ref(false)
 
 // 翻译文本
 const texts = computed(() => ({
-  sectionTitle: locale.value === 'zh' ? '规则集状态' : 'Ruleset Status',
+  sectionTitle: locale.value === 'zh' ? '规则集' : 'Ruleset',
   geositeCn: locale.value === 'zh' ? '域名规则集' : 'Domain Ruleset',
   geoipCn: locale.value === 'zh' ? 'IP 规则集' : 'IP Ruleset',
   lastUpdated: locale.value === 'zh' ? '更新时间' : 'Last Updated',
@@ -55,13 +63,15 @@ const texts = computed(() => ({
   notFound: locale.value === 'zh' ? '未找到' : 'Not Found',
   needsUpdate: locale.value === 'zh' ? '需要更新' : 'Needs Update',
   upToDate: locale.value === 'zh' ? '已是最新' : 'Up to Date',
-  checkStatus: locale.value === 'zh' ? '检查状态' : 'Check Status',
-  checking: locale.value === 'zh' ? '检查中...' : 'Checking...',
+  updateRuleset: locale.value === 'zh' ? '更新规则集' : 'Update Ruleset',
+  updating: locale.value === 'zh' ? '更新中...' : 'Updating...',
   updateHint: locale.value === 'zh' 
-    ? '规则集超过 7 天未更新，建议手动更新以保持最佳分流效果' 
+    ? '规则集超过 7 天未更新，建议更新以保持最佳分流效果' 
     : 'Ruleset is over 7 days old. Consider updating for optimal routing.',
   checkFailed: locale.value === 'zh' ? '检查失败' : 'Check Failed',
-  checkSuccess: locale.value === 'zh' ? '检查完成' : 'Check Complete',
+  updateSuccess: locale.value === 'zh' ? '规则集更新成功' : 'Ruleset Updated Successfully',
+  updateFailed: locale.value === 'zh' ? '更新失败' : 'Update Failed',
+  partialSuccess: locale.value === 'zh' ? '部分更新成功' : 'Partial Update Success',
 }))
 
 // 图标
@@ -88,18 +98,28 @@ function formatSize(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }
 
-// 获取规则集状态
-async function checkRulesetStatus() {
-  isChecking.value = true
+// 更新规则集
+async function updateRulesets() {
+  isUpdating.value = true
   try {
-    const status = await invoke<RulesetStatus>('get_ruleset_status')
-    rulesetStatus.value = status
-    notification.success(texts.value.checkSuccess)
+    const result = await invoke<RulesetUpdateResult>('update_ruleset')
+    
+    if (result.status) {
+      rulesetStatus.value = result.status
+    }
+    
+    if (result.success && result.updated_count === 2) {
+      notification.success(texts.value.updateSuccess)
+    } else if (result.updated_count > 0) {
+      notification.warning(`${texts.value.partialSuccess}: ${result.error || ''}`)
+    } else {
+      notification.error(`${texts.value.updateFailed}: ${result.error || ''}`)
+    }
   } catch (error) {
-    console.error('Failed to check ruleset status:', error)
-    notification.error(texts.value.checkFailed)
+    console.error('Failed to update rulesets:', error)
+    notification.error(`${texts.value.updateFailed}: ${error}`)
   } finally {
-    isChecking.value = false
+    isUpdating.value = false
   }
 }
 
@@ -194,22 +214,22 @@ onMounted(async () => {
           </div>
         </SettingRow>
 
-        <!-- 检查按钮 -->
+        <!-- 更新按钮 -->
         <div class="p-3 flex justify-end">
           <button 
-            @click="checkRulesetStatus"
-            :disabled="isChecking"
+            @click="updateRulesets"
+            :disabled="isUpdating"
             class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-lg transition-colors
               bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20
               disabled:opacity-50 disabled:cursor-not-allowed">
             <svg 
-              :class="['w-3.5 h-3.5', isChecking ? 'animate-spin' : '']" 
+              :class="['w-3.5 h-3.5', isUpdating ? 'animate-spin' : '']" 
               fill="none" 
               stroke="currentColor" 
               viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="icons.refresh" />
             </svg>
-            {{ isChecking ? texts.checking : texts.checkStatus }}
+            {{ isUpdating ? texts.updating : texts.updateRuleset }}
           </button>
         </div>
       </template>

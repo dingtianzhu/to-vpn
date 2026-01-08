@@ -258,6 +258,9 @@ pub fn force_cleanup() {
 
     let _ = fs::remove_file(get_singbox_pid_file());
     let _ = fs::remove_file(get_tun_lock_file());
+    
+    // 恢复网络状态（DNS、路由、IPv6）
+    restore_network_state();
 }
 
 /// 获取当前活动的网络服务名称
@@ -307,4 +310,117 @@ pub fn set_system_ipv6(enable: bool) {
             .args(["-setv6off", &service_name])
             .output();
     }
+}
+
+/// 恢复系统 DNS 设置
+/// 
+/// VPN 断开时调用，将 DNS 恢复为 DHCP 自动获取
+/// 防止 DNS 残留导致断开后无法上网
+pub fn restore_system_dns() {
+    let service_name = match get_active_network_service() {
+        Some(name) => name,
+        None => "Wi-Fi".to_string(),
+    };
+
+    println!(">>> Restoring DNS to automatic on {}...", service_name);
+    
+    // 设置为 "empty" 表示使用 DHCP 自动获取的 DNS
+    let _ = Command::new("networksetup")
+        .args(["-setdnsservers", &service_name, "empty"])
+        .output();
+
+    // 刷新 DNS 缓存
+    let _ = Command::new("dscacheutil")
+        .args(["-flushcache"])
+        .output();
+    let _ = Command::new("killall")
+        .args(["-HUP", "mDNSResponder"])
+        .output();
+}
+
+/// 清理残留路由表
+/// 
+/// 删除指向 utun 接口的默认路由，恢复正常网络
+pub fn cleanup_routes() {
+    println!(">>> Cleaning up routes...");
+    
+    // 获取当前默认网关
+    let gateway = get_default_gateway();
+    
+    // 删除可能残留的 utun 路由
+    for i in 0..10 {
+        let utun = format!("utun{}", i);
+        let _ = Command::new(CMD_SUDO)
+            .args(["-n", "-k", CMD_ROUTE, "delete", "default", "-ifscope", &utun])
+            .output();
+    }
+    
+    // 如果有默认网关，确保默认路由指向它
+    if let Some(gw) = gateway {
+        println!(">>> Restoring default route to {}...", gw);
+        // 先删除可能错误的默认路由
+        let _ = Command::new(CMD_SUDO)
+            .args(["-n", "-k", CMD_ROUTE, "delete", "default"])
+            .output();
+        // 添加正确的默认路由
+        let _ = Command::new(CMD_SUDO)
+            .args(["-n", "-k", CMD_ROUTE, "add", "default", &gw])
+            .output();
+    }
+}
+
+/// 获取当前默认网关（从 en0 接口）
+fn get_default_gateway() -> Option<String> {
+    let output = Command::new(CMD_ROUTE)
+        .args(["-n", "get", "default"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let s = String::from_utf8_lossy(&output.stdout);
+    for line in s.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("gateway:") {
+            return Some(rest.trim().to_string());
+        }
+    }
+    
+    // 如果找不到，尝试从 netstat 获取
+    if let Ok(output) = Command::new("netstat")
+        .args(["-rn"])
+        .output()
+    {
+        let s = String::from_utf8_lossy(&output.stdout);
+        for line in s.lines() {
+            if line.contains("default") && line.contains("en0") && !line.contains("utun") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    return Some(parts[1].to_string());
+                }
+            }
+        }
+    }
+    
+    None
+}
+
+/// 完整的网络状态恢复
+/// 
+/// 在 VPN 断开时调用，恢复所有网络设置
+pub fn restore_network_state() {
+    println!(">>> Restoring network state...");
+    
+    // 1. 恢复 DNS
+    restore_system_dns();
+    
+    // 2. 清理路由
+    cleanup_routes();
+    
+    // 3. 恢复 IPv6
+    set_system_ipv6(true);
+    
+    println!(">>> Network state restored");
 }

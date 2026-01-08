@@ -15,14 +15,15 @@ use tracing::{error, info, warn};
 use crate::constants::{self, get_cache_dir};
 use crate::error::{Result, VpnError};
 
-use super::config::{ConfigOptions, ConnectConfig};
+use super::config::{ConfigOptions, ConnectConfig, RouteMode, TunStack};
 use super::monitor::{
     emit_log, emit_status_change, start_monitor, start_process_watchdog, stop_monitor,
     stop_watchdog,
 };
 use super::platform;
 use super::security;
-use super::singbox::{generate_config_with_options, is_fatal_error, parse_log_level};
+use super::singbox;
+use super::singbox::{generate_config_with_ports, is_fatal_error, parse_log_level};
 use super::state::{VpnState, VpnStatusEnum};
 
 #[derive(serde::Serialize)]
@@ -44,6 +45,10 @@ pub fn precheck_tun_permission() -> TunPrecheckResult {
     }
 }
 
+/// Tauri 命令：连接 VPN
+/// 
+/// **Feature: vpn-pure-mode**
+/// **Validates: Requirements 1.5, 3.2, 3.3, 3.4, 4.2, 5.3, 6.2, 7.3, 8.2, 9.2**
 #[tauri::command]
 pub async fn connect_hysteria(
     app_handle: AppHandle,
@@ -56,11 +61,45 @@ pub async fn connect_hysteria(
     server_mtu: u16,
     server_dns: String,
     // 高级配置选项
-    tcp_fast_open: Option<bool>,
     up_mbps: Option<u32>,
     down_mbps: Option<u32>,
     block_quic: Option<bool>,
     disable_ipv6: Option<bool>,
+    // P0: 代理端口配置
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 1.5**
+    socks_port: Option<u16>,
+    http_port: Option<u16>,
+    // P0: 路由模式
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 3.2, 3.3, 3.4**
+    route_mode: Option<String>,
+    // P1: DNS 泄漏防护
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 4.2**
+    dns_leak_protection: Option<bool>,
+    // P1: 自定义域名
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 5.3**
+    custom_bypass_domains: Option<Vec<String>>,
+    custom_proxy_domains: Option<Vec<String>>,
+    // P2: WebRTC 阻断
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 6.2**
+    block_webrtc: Option<bool>,
+    // P2: 分应用代理
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 7.3**
+    excluded_apps: Option<Vec<String>>,
+    forced_proxy_apps: Option<Vec<String>>,
+    // P3: TUN 网络栈
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 8.2**
+    tun_stack: Option<String>,
+    // 绕过局域网
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 9.2**
+    bypass_lan: Option<bool>,
 ) -> std::result::Result<String, String> {
     let current_status = state.get_status();
     if current_status == VpnStatusEnum::Connected {
@@ -79,23 +118,82 @@ pub async fn connect_hysteria(
     }
 
     // 创建高级配置选项
-    let options = ConfigOptions::new(
-        tcp_fast_open.unwrap_or(true),
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 1.5, 3.2, 3.3, 3.4, 4.2, 5.3, 6.2, 7.3, 8.2, 9.2**
+    let mut options = ConfigOptions::new(
         up_mbps.unwrap_or(200),
         down_mbps.unwrap_or(500),
         block_quic.unwrap_or(true),
         disable_ipv6.unwrap_or(true),
     );
+    
+    // P0: 路由模式
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 3.2, 3.3, 3.4**
+    if let Some(rm) = route_mode {
+        options.route_mode = RouteMode::from_str(&rm);
+    }
+    
+    // P1: DNS 泄漏防护
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 4.2**
+    options.dns_leak_protection = dns_leak_protection.unwrap_or(true);
+    
+    // P1: 自定义域名
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 5.3**
+    if let Some(domains) = custom_bypass_domains {
+        options.custom_bypass_domains = domains;
+    }
+    if let Some(domains) = custom_proxy_domains {
+        options.custom_proxy_domains = domains;
+    }
+    
+    // P2: WebRTC 阻断（默认启用）
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 6.2**
+    options.block_webrtc = block_webrtc.unwrap_or(true);
+    
+    // P2: 分应用代理
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 7.3**
+    if let Some(apps) = excluded_apps {
+        options.excluded_apps = apps;
+    }
+    if let Some(apps) = forced_proxy_apps {
+        options.forced_proxy_apps = apps;
+    }
+    
+    // P3: TUN 网络栈
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 8.2**
+    if let Some(stack) = tun_stack {
+        options.tun_stack = TunStack::from_str(&stack);
+    }
+    
+    // 绕过局域网
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 9.2**
+    options.bypass_lan = bypass_lan.unwrap_or(true);
+    
     if let Err(e) = options.validate() {
         return Err(e.user_message());
     }
+    
+    // P0: 代理端口配置
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 1.5**
+    let proxy_ports = singbox::ProxyPorts {
+        socks_port: socks_port.unwrap_or(constants::DEFAULT_SOCKS_PORT),
+        http_port: http_port.unwrap_or(constants::DEFAULT_HTTP_PORT),
+    };
 
     state.set_user_disconnect(false);
     state.set_status(VpnStatusEnum::Connecting);
     emit_status_change(&app_handle, &state);
     state.set_server_id(Some(server_id));
 
-    match do_connect(&app_handle, &state, &config, &options).await {
+    match do_connect(&app_handle, &state, &config, &options, &proxy_ports).await {
         Ok(_) => {
             state.set_status(VpnStatusEnum::Connected);
             state.set_connected_at(
@@ -200,9 +298,9 @@ fn fast_cleanup_connection(app_handle: &AppHandle, state: &VpnState, is_user_act
     // **Validates: Requirements 1.2, 1.4 - 同时清除 SOCKS 和 HTTP 代理**
     platform::set_system_proxy(false);
     
-    // 恢复系统 IPv6
+    // 恢复系统网络状态（DNS、路由、IPv6）
     #[cfg(target_os = "macos")]
-    platform::set_system_ipv6(true);
+    platform::restore_network_state();
 
     let mode = state.get_current_mode();
 
@@ -283,6 +381,7 @@ async fn do_connect(
     state: &VpnState,
     config: &ConnectConfig,
     options: &ConfigOptions,
+    ports: &singbox::ProxyPorts,
 ) -> Result<()> {
     let app_dir = app_handle
         .path()
@@ -306,7 +405,9 @@ async fn do_connect(
     };
     let cache_path = app_dir.join(cache_filename);
 
-    let config_content = generate_config_with_options(config, &cache_path, options)?;
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 1.5 - 使用配置的端口**
+    let config_content = generate_config_with_ports(config, &cache_path, options, ports)?;
 
     let config_json = serde_json::to_string_pretty(&config_content)
         .map_err(|e| VpnError::Config(format!("Serialize failed: {}", e)))?;

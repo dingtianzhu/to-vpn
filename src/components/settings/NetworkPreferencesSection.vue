@@ -18,7 +18,7 @@ const vpnStore = useVpnStore()
 const notification = useNotification()
 
 const { settings } = storeToRefs(settingsStore)
-const { t } = storeToRefs(i18nStore)
+const { t, locale } = storeToRefs(i18nStore)
 const { status } = storeToRefs(vpnStore)
 
 // 自定义 DNS 输入状态
@@ -31,6 +31,23 @@ watch(() => settings.value.customDns, (newVal) => {
     customDnsInput.value = newVal || ''
   }
 })
+
+// 翻译文本
+const texts = computed(() => ({
+  autoReconnectDesc: locale.value === 'zh' 
+    ? 'VPN 断开后自动尝试重新连接' 
+    : 'Automatically reconnect when VPN disconnects',
+  dnsDesc: locale.value === 'zh' 
+    ? '选择 DNS 服务器，影响域名解析速度和隐私' 
+    : 'Select DNS server, affects domain resolution speed and privacy',
+  mtuDesc: locale.value === 'zh' 
+    ? '最大传输单元，影响网络性能和稳定性' 
+    : 'Maximum Transmission Unit, affects network performance and stability',
+  // 默认值
+  defaultOff: locale.value === 'zh' ? '默认: 关' : 'Default: Off',
+  defaultCloudflare: locale.value === 'zh' ? '默认: Cloudflare' : 'Default: Cloudflare',
+  defaultMtu: locale.value === 'zh' ? '默认: 1400' : 'Default: 1400',
+}))
 
 const dnsOptions = computed(() => [
   { value: 'cloudflare', label: 'Cloudflare (1.1.1.1)' },
@@ -145,13 +162,16 @@ async function handleCustomDnsBlur() {
 
       <!-- Auto Reconnect -->
       <SettingRow :icon="icons.reconnect" icon-color="text-orange-500" icon-bg="bg-orange-500/10"
-        :title="t.settings.autoReconnect">
+        :title="t.settings.autoReconnect" :subtitle="texts.autoReconnectDesc" :default-value="texts.defaultOff">
         <SettingSwitch :model-value="settings.autoReconnect" @update:model-value="toggleAutoReconnect" />
       </SettingRow>
 
       <!-- DNS Provider -->
+      <!-- **Feature: vpn-pure-mode** -->
+      <!-- **Validates: Requirements 10.2, 10.3** -->
       <div>
-        <SettingRow :icon="icons.dns" icon-color="text-blue-500" icon-bg="bg-blue-500/10" :title="t.settings.dns">
+        <SettingRow :icon="icons.dns" icon-color="text-blue-500" icon-bg="bg-blue-500/10" :title="t.settings.dns" 
+          :subtitle="texts.dnsDesc" :default-value="texts.defaultCloudflare" :requires-reconnect="true">
           <SettingSelect :model-value="settings.dnsMode" :options="dnsOptions" @update:model-value="updateDns" />
         </SettingRow>
 
@@ -181,7 +201,10 @@ async function handleCustomDnsBlur() {
       </div>
 
       <!-- MTU Size -->
-      <SettingRow :icon="icons.mtu" icon-color="text-purple-500" icon-bg="bg-purple-500/10" :title="t.settings.mtu">
+      <!-- **Feature: vpn-pure-mode** -->
+      <!-- **Validates: Requirements 10.2, 10.3** -->
+      <SettingRow :icon="icons.mtu" icon-color="text-purple-500" icon-bg="bg-purple-500/10" :title="t.settings.mtu" 
+        :subtitle="texts.mtuDesc" :default-value="texts.defaultMtu" :requires-reconnect="true">
         <SettingSelect :model-value="settings.mtu" :options="mtuOptions" @update:model-value="updateMtu" />
       </SettingRow>
 

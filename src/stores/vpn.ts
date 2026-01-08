@@ -199,6 +199,11 @@ export const useVpnStore = defineStore("vpn", () => {
           /* 忽略 */
         }
 
+        // 获取公网 IP
+        const settingsStore = useSettingsStore();
+        const isTunMode = settingsStore.settings.connectionMode === "tun";
+        fetchPublicIp(!isTunMode);
+
         // 恢复当前服务器信息显示（如果有）
         const serversStore = useServersStore();
         if (result.server_id && serversStore.servers.length > 0) {
@@ -292,6 +297,10 @@ export const useVpnStore = defineStore("vpn", () => {
             _latencyMonitor!.startMonitoring(); // 启动延迟监控
             startRealtimeUsageCheck();
             isUserDisconnecting.value = false;
+            // 获取公网 IP
+            const settingsStore = useSettingsStore();
+            const isTunMode = settingsStore.settings.connectionMode === "tun";
+            fetchPublicIp(!isTunMode);
           } else if (newStatus === "disconnected") {
             stopConnectedTimeCounter();
             stopRealtimeUsageCheck();
@@ -517,11 +526,45 @@ export const useVpnStore = defineStore("vpn", () => {
           serverMtu: settingsStore.settings.mtu,
           serverDns: dnsConfig,
           // 高级配置选项
-          tcpFastOpen: settingsStore.settings.enableTcpFastOpen,
           upMbps: settingsStore.settings.upMbps,
           downMbps: settingsStore.settings.downMbps,
           blockQuic: settingsStore.settings.blockQuic,
           disableIpv6: settingsStore.settings.disableIpv6,
+          // P0: 代理端口配置
+          // **Feature: vpn-pure-mode**
+          // **Validates: Requirements 1.5**
+          socksPort: settingsStore.settings.socksPort,
+          httpPort: settingsStore.settings.httpPort,
+          // P0: 路由模式
+          // **Feature: vpn-pure-mode**
+          // **Validates: Requirements 3.2, 3.3, 3.4**
+          routeMode: settingsStore.settings.routeMode,
+          // P1: DNS 泄漏防护
+          // **Feature: vpn-pure-mode**
+          // **Validates: Requirements 4.2**
+          dnsLeakProtection: settingsStore.settings.dnsLeakProtection,
+          // P1: 自定义域名
+          // **Feature: vpn-pure-mode**
+          // **Validates: Requirements 5.3**
+          customBypassDomains: settingsStore.settings.customBypassDomains,
+          customProxyDomains: settingsStore.settings.customProxyDomains,
+          // P2: WebRTC 阻断
+          // **Feature: vpn-pure-mode**
+          // **Validates: Requirements 6.2**
+          blockWebrtc: settingsStore.settings.blockWebRTC,
+          // P2: 分应用代理
+          // **Feature: vpn-pure-mode**
+          // **Validates: Requirements 7.3**
+          excludedApps: settingsStore.settings.excludedApps,
+          forcedProxyApps: settingsStore.settings.forcedProxyApps,
+          // P3: TUN 网络栈
+          // **Feature: vpn-pure-mode**
+          // **Validates: Requirements 8.2**
+          tunStack: settingsStore.settings.tunStack,
+          // 绕过局域网
+          // **Feature: vpn-pure-mode**
+          // **Validates: Requirements 9.2**
+          bypassLan: settingsStore.settings.bypassLan,
         });
 
         // 短暂等待后同步一次状态
@@ -531,6 +574,8 @@ export const useVpnStore = defineStore("vpn", () => {
         if (status.value === ("connected" as VpnStatus)) {
           const isTunMode = settingsStore.settings.connectionMode === "tun";
           testConnectivity(!isTunMode);
+          // 获取公网 IP
+          fetchPublicIp(!isTunMode);
         }
       } catch (e) {
         console.error("[VPN] Connect error:", e);
@@ -590,6 +635,16 @@ export const useVpnStore = defineStore("vpn", () => {
         error: String(e),
         test_url: "",
       };
+    }
+  }
+
+  async function fetchPublicIp(useProxy = true): Promise<void> {
+    try {
+      const ip = await invoke<string>("get_public_ip", { useProxy });
+      stats.value.ip = ip;
+    } catch (e) {
+      console.error("[VPN] Failed to fetch public IP:", e);
+      stats.value.ip = "";
     }
   }
 

@@ -102,6 +102,58 @@ pub async fn test_connectivity(use_proxy: bool) -> ConnectivityResult {
     }
 }
 
+/// 获取公网 IP 地址
+/// 
+/// 通过 SOCKS 代理获取当前的公网 IP
+/// **Feature: vpn-pure-mode**
+#[tauri::command]
+pub async fn get_public_ip(use_proxy: bool) -> Result<String, String> {
+    // 使用多个 IP 查询服务作为备选
+    let ip_services = [
+        "https://api.ipify.org",
+        "https://icanhazip.com",
+        "https://ifconfig.me/ip",
+    ];
+
+    let client_result = if use_proxy {
+        let proxy = reqwest::Proxy::all(format!("socks5://127.0.0.1:{}", DEFAULT_SOCKS_PORT))
+            .map_err(|e| format!("Invalid proxy config: {}", e))?;
+
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .proxy(proxy)
+            .build()
+    } else {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+    };
+
+    let client = client_result.map_err(|e| format!("Failed to create client: {}", e))?;
+
+    for url in ip_services {
+        match client.get(url).send().await {
+            Ok(response) => {
+                if response.status().is_success() {
+                    if let Ok(ip) = response.text().await {
+                        let ip = ip.trim().to_string();
+                        // 验证是否为有效 IP 格式
+                        if ip.parse::<std::net::IpAddr>().is_ok() {
+                            info!(ip = %ip, service = %url, "Got public IP");
+                            return Ok(ip);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, service = %url, "Failed to get IP from service");
+            }
+        }
+    }
+
+    Err("Failed to get public IP from all services".to_string())
+}
+
 /// 测试 DNS 解析
 #[tauri::command]
 pub async fn test_dns_resolution(domain: String) -> ConnectivityResult {

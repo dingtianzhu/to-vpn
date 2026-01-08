@@ -8,3 +8,6 @@ export * from './vpn'
 
 // 存储键名常量
 export * from './storage'
+
+// 应用预设数据
+export * from './apps'

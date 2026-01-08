@@ -1,15 +1,29 @@
 //! TUN 模式配置模块
-use super::{pick_remote_dns_address, resolve_ipv4, RuleSetPaths};
+use super::{get_lan_bypass_cidrs, get_webrtc_domains, get_webrtc_ports, pick_remote_dns_address, resolve_ipv4, RuleSetPaths};
 use crate::constants::{self, tun, MTU_MAX, SINGBOX_API_PORT_TUN};
 use crate::error::Result;
-use crate::vpn::config::ConnectConfig;
+use crate::vpn::config::{ConfigOptions, ConnectConfig, TunStack};
 use serde_json::{json, Value};
 use std::net::IpAddr;
 use std::path::Path;
 use tracing::info;
 
 pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths) -> Result<Value> {
-    info!(">>> Generating TUN config (Dual Stack) <<<");
+    // 使用默认配置选项
+    generate_with_options(config, cache_path, ruleset, &ConfigOptions::default())
+}
+
+/// 生成 TUN 模式配置（带高级选项）
+/// 
+/// **Feature: vpn-pure-mode**
+/// **Validates: Requirements 5.1, 5.2, 5.3**
+pub fn generate_with_options(
+    config: &ConnectConfig, 
+    cache_path: &Path, 
+    ruleset: RuleSetPaths,
+    options: &ConfigOptions,
+) -> Result<Value> {
+    info!(">>> Generating TUN config (Dual Stack) with options <<<");
 
     // 1. 基础参数
     let mtu = if config.mtu > 0 && config.mtu <= MTU_MAX {
@@ -33,6 +47,11 @@ pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths
     // **Feature: vpn-optimization, Property 11: IPv4 Only 策略**
     // **Validates: Requirements - IPv6 禁用**
     // 由于 VPS 服务器不支持 IPv6，仅配置 IPv4 地址以避免连接问题
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 8.1, 8.2 - TUN 网络栈选择**
+    let tun_stack = options.tun_stack.as_str();
+    info!("Using TUN stack: {}", tun_stack);
+    
     let inbounds = json!([{
         "type": "tun",
         "tag": "tun-in",
@@ -40,7 +59,7 @@ pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths
         "mtu": mtu,
         "auto_route": true,
         "strict_route": true,
-        "stack": "gvisor",//gvisor
+        "stack": tun_stack,
         "sniff": true,
         "sniff_override_destination": true,
         "platform": {
@@ -98,9 +117,70 @@ pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths
         json!({ "domain_suffix": [".lan", ".local", ".home", ".internal"], "outbound": "direct" }),
     );
     // 屏蔽 QUIC (UDP 443)
-    route_rules.push(json!({ "port": 443, "network": "udp", "action": "reject" }));
+    if options.block_quic {
+        route_rules.push(json!({ "port": 443, "network": "udp", "action": "reject" }));
+    }
+    
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 6.2, 6.3 - WebRTC 阻断**
+    // 阻断 STUN/TURN 端口和 WebRTC 相关域名，防止浏览器通过 WebRTC 泄露真实 IP
+    if options.block_webrtc {
+        // 阻断 STUN/TURN 端口 (3478, 5349, 19302)
+        let webrtc_ports = get_webrtc_ports();
+        route_rules.push(json!({ "port": webrtc_ports, "network": "udp", "action": "reject" }));
+        info!("WebRTC blocking enabled: blocking UDP ports {:?}", webrtc_ports);
+        
+        // 阻断 WebRTC 相关域名
+        let webrtc_domains = get_webrtc_domains();
+        route_rules.push(json!({ "domain_suffix": webrtc_domains, "action": "reject" }));
+        info!("WebRTC blocking: blocking {} domains", webrtc_domains.len());
+    }
+    
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 5.3 - 自定义域名优先级高于 geo 规则**
+    // 自定义代理域名（强制走代理）- 放在 geo 规则之前
+    if !options.custom_proxy_domains.is_empty() {
+        let proxy_domains: Vec<&str> = options.custom_proxy_domains.iter().map(|s| s.as_str()).collect();
+        route_rules.push(json!({ "domain_suffix": proxy_domains, "outbound": "proxy" }));
+        info!("Custom proxy domains: {:?}", options.custom_proxy_domains);
+    }
+    
+    // 自定义直连域名（强制直连）- 放在 geo 规则之前
+    if !options.custom_bypass_domains.is_empty() {
+        let bypass_domains: Vec<&str> = options.custom_bypass_domains.iter().map(|s| s.as_str()).collect();
+        route_rules.push(json!({ "domain_suffix": bypass_domains, "outbound": "direct" }));
+        info!("Custom bypass domains: {:?}", options.custom_bypass_domains);
+    }
+    
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 7.3 - 分应用代理（进程路由规则）**
+    // 强制代理的应用 - 放在 geo 规则之前
+    if !options.forced_proxy_apps.is_empty() {
+        let proxy_apps: Vec<&str> = options.forced_proxy_apps.iter().map(|s| s.as_str()).collect();
+        route_rules.push(json!({ "process_name": proxy_apps, "outbound": "proxy" }));
+        info!("Forced proxy apps: {:?}", options.forced_proxy_apps);
+    }
+    
+    // 排除的应用（绕过 VPN）- 放在 geo 规则之前
+    if !options.excluded_apps.is_empty() {
+        let excluded_apps: Vec<&str> = options.excluded_apps.iter().map(|s| s.as_str()).collect();
+        route_rules.push(json!({ "process_name": excluded_apps, "outbound": "direct" }));
+        info!("Excluded apps (bypass VPN): {:?}", options.excluded_apps);
+    }
+    
     route_rules.push(json!({ "rule_set": "geosite-cn", "outbound": "direct" }));
     route_rules.push(json!({ "rule_set": "geoip-cn", "outbound": "direct" }));
+    
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 9.1, 9.2, 9.3, 9.4 - 绕过局域网配置**
+    // 当 bypass_lan 启用时，添加完整的 RFC1918 私有地址范围和 link-local 地址
+    if options.bypass_lan {
+        let lan_cidrs = get_lan_bypass_cidrs();
+        route_rules.push(json!({ "ip_cidr": lan_cidrs, "outbound": "direct" }));
+        info!("LAN bypass enabled: routing private IP ranges directly");
+    }
+    
+    // 私有 IP 通用规则（作为后备）
     route_rules.push(json!({ "ip_is_private": true, "outbound": "direct" }));
 
     // 6. Outbounds
@@ -112,7 +192,6 @@ pub fn generate(config: &ConnectConfig, cache_path: &Path, ruleset: RuleSetPaths
         "password": config.password,
         "up_mbps": 200,
         "down_mbps": 500,
-        "tcp_fast_open": true,
         "tls": {
             "enabled": true,
             "alpn": ["h3"],

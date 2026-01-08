@@ -2,6 +2,7 @@
 interface Option {
   value: string | number
   label: string
+  description?: string
 }
 
 interface Props {
@@ -16,8 +17,9 @@ defineEmits<{ 'update:modelValue': [value: string | number] }>()
 <template>
   <div class="relative">
     <select :value="modelValue" @change="$emit('update:modelValue', ($event.target as HTMLSelectElement).value)"
-      class="appearance-none bg-transparent pl-3 pr-8 py-1 text-[13px] text-[var(--vpn-text)] font-medium outline-none text-right cursor-pointer focus:bg-black/5 dark:focus:bg-white/5 rounded-md transition-colors">
-      <option v-for="opt in options" :key="opt.value" :value="opt.value">
+      class="appearance-none bg-transparent pl-3 pr-8 py-1 text-[13px] text-[var(--vpn-text)] font-medium outline-none text-right cursor-pointer focus:bg-black/5 dark:focus:bg-white/5 rounded-md transition-colors"
+      :title="options.find(o => o.value === modelValue)?.description">
+      <option v-for="opt in options" :key="opt.value" :value="opt.value" :title="opt.description">
         {{ opt.label }}
       </option>
     </select>

@@ -6,8 +6,9 @@ mod tray;
 mod vpn;
 
 use tauri::Manager;
+use vpn::killswitch::KillSwitch;
 use vpn::platform;
-use vpn::ruleset::{check_ruleset_status, RulesetStatus};
+use vpn::ruleset::{check_ruleset_status, update_rulesets, RulesetStatus, RulesetUpdateResult};
 use vpn::state::VpnState;
 
 /// Tauri 命令：检查规则集状态
@@ -17,6 +18,64 @@ use vpn::state::VpnState;
 #[tauri::command]
 fn get_ruleset_status() -> RulesetStatus {
     check_ruleset_status()
+}
+
+/// Tauri 命令：更新规则集
+///
+/// **Feature: vpn-optimization**
+/// **Validates: Requirements 5.3, 7.2, 7.3**
+#[tauri::command]
+async fn update_ruleset() -> RulesetUpdateResult {
+    update_rulesets().await
+}
+
+/// Tauri 命令：检查端口是否可用
+///
+/// **Feature: vpn-pure-mode**
+/// **Validates: Requirements 1.6**
+#[tauri::command]
+fn check_port_available(port: u16) -> Result<bool, String> {
+    // First validate the port range
+    if let Err(e) = vpn::port::validate_port_range(port) {
+        return Err(e.to_string());
+    }
+    Ok(vpn::port::is_port_available(port))
+}
+
+/// Tauri 命令：验证代理端口配置
+///
+/// **Feature: vpn-pure-mode**
+/// **Validates: Requirements 1.3, 1.6**
+#[tauri::command]
+fn validate_proxy_ports(socks_port: u16, http_port: u16) -> Result<(), String> {
+    vpn::port::validate_proxy_ports(socks_port, http_port).map_err(|e| e.to_string())
+}
+
+/// Tauri 命令：启用 Kill Switch
+///
+/// **Feature: vpn-pure-mode**
+/// **Validates: Requirements 2.2**
+#[tauri::command]
+fn enable_kill_switch() -> Result<(), String> {
+    KillSwitch::enable()
+}
+
+/// Tauri 命令：禁用 Kill Switch
+///
+/// **Feature: vpn-pure-mode**
+/// **Validates: Requirements 2.4**
+#[tauri::command]
+fn disable_kill_switch() -> Result<(), String> {
+    KillSwitch::disable()
+}
+
+/// Tauri 命令：检查 Kill Switch 状态
+///
+/// **Feature: vpn-pure-mode**
+/// **Validates: Requirements 2.1**
+#[tauri::command]
+fn is_kill_switch_enabled() -> bool {
+    KillSwitch::is_enabled()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -53,10 +112,19 @@ pub fn run() {
             // 连通性测试
             vpn::connectivity::test_connectivity,
             vpn::connectivity::test_dns_resolution,
+            vpn::connectivity::get_public_ip,
             // 🔧 新增: DNS泄漏检测
             vpn::dns_leak_test::check_dns_leak,
-            // 🔧 新增: 规则集状态检查
+            // 🔧 新增: 规则集状态检查和更新
             get_ruleset_status,
+            update_ruleset,
+            // 🔧 新增: 端口验证
+            check_port_available,
+            validate_proxy_ports,
+            // 🔧 新增: Kill Switch
+            enable_kill_switch,
+            disable_kill_switch,
+            is_kill_switch_enabled,
             // 托盘功能
             tray::hide_tray_popup,
             tray::show_main_window,
@@ -100,9 +168,18 @@ pub fn run() {
 }
 
 fn cleanup_on_exit(app_handle: &tauri::AppHandle) {
+    // 清理 Kill Switch（应用退出时必须禁用）
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements 2.5 - 应用退出时禁用 Kill Switch 并恢复网络**
+    KillSwitch::force_cleanup();
+    
     platform::force_cleanup();
     // 清除所有系统代理（SOCKS + HTTP）
     vpn::proxy::set_system_proxy(false);
+    
+    // 恢复网络状态（DNS、路由、IPv6）
+    #[cfg(target_os = "macos")]
+    platform::restore_network_state();
 
     if let Some(state) = app_handle.try_state::<VpnState>() {
         state.reset();

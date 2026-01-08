@@ -8,6 +8,8 @@ import { useNotification } from '@/composables/useNotification'
 import { storeToRefs } from 'pinia'
 import SettingRow from './SettingRow.vue'
 import SettingSwitch from './SettingSwitch.vue'
+import SettingSelect from './SettingSelect.vue'
+import type { TunStack } from '@/types'
 
 
 const router = useRouter()
@@ -42,23 +44,58 @@ watch(() => settings.value.downMbps, (newVal: number) => {
 // 翻译文本
 const texts = computed(() => ({
   sectionTitle: locale.value === 'zh' ? '高级网络' : 'Advanced Network',
-  tcpFastOpen: locale.value === 'zh' ? 'TCP Fast Open' : 'TCP Fast Open',
-  tcpFastOpenDesc: locale.value === 'zh' ? '减少连接延迟' : 'Reduce connection latency',
   upMbps: locale.value === 'zh' ? '上行带宽限制' : 'Upload Bandwidth',
+  upMbpsDesc: locale.value === 'zh' ? '限制上传速度，0 表示不限制' : 'Limit upload speed, 0 means unlimited',
   downMbps: locale.value === 'zh' ? '下行带宽限制' : 'Download Bandwidth',
+  downMbpsDesc: locale.value === 'zh' ? '限制下载速度，0 表示不限制' : 'Limit download speed, 0 means unlimited',
   blockQuic: locale.value === 'zh' ? '阻断 QUIC' : 'Block QUIC',
-  blockQuicDesc: locale.value === 'zh' ? '避免与 Hysteria2 冲突' : 'Avoid conflicts with Hysteria2',
+  blockQuicDesc: locale.value === 'zh' ? '阻断 UDP 443 端口，强制浏览器使用 TCP，避免 HTTP/3 流量绕过代理' : 'Block UDP port 443, force browsers to use TCP, prevent HTTP/3 traffic bypass',
   disableIpv6: locale.value === 'zh' ? '禁用 IPv6' : 'Disable IPv6',
-  disableIpv6Desc: locale.value === 'zh' ? 'TUN 模式下防止 IPv6 泄漏' : 'Prevent IPv6 leak in TUN mode',
+  disableIpv6Desc: locale.value === 'zh' ? 'TUN 模式下只配置 IPv4 地址，防止 IPv6 泄漏真实位置' : 'Only configure IPv4 in TUN mode to prevent IPv6 location leaks',
+  tunStack: locale.value === 'zh' ? 'TUN 网络栈' : 'TUN Stack',
+  tunStackDesc: locale.value === 'zh' ? '选择 TUN 模式的网络栈实现，影响性能和兼容性' : 'Select TUN mode network stack, affects performance and compatibility',
   mbps: 'Mbps',
   invalidBandwidth: locale.value === 'zh' ? '请输入有效的带宽值 (1-10000)' : 'Enter valid bandwidth (1-10000)',
+  requiresReconnect: locale.value === 'zh' ? '需要重连' : 'Requires reconnect',
+  // 默认值
+  defaultUp: locale.value === 'zh' ? '默认: 500' : 'Default: 500',
+  defaultDown: locale.value === 'zh' ? '默认: 1000' : 'Default: 1000',
+  defaultOn: locale.value === 'zh' ? '默认: 开' : 'Default: On',
+  defaultGvisor: locale.value === 'zh' ? '默认: gVisor' : 'Default: gVisor',
 }))
 
+// TUN 网络栈选项
+// **Feature: vpn-pure-mode**
+// **Validates: Requirements 8.1, 8.3**
+const tunStackOptions = computed(() => [
+  {
+    value: 'gvisor' as TunStack,
+    label: 'gVisor',
+    description: locale.value === 'zh' 
+      ? '用户态网络栈，平衡性能和兼容性（推荐）' 
+      : 'User-space stack, balanced performance and compatibility (recommended)'
+  },
+  {
+    value: 'system' as TunStack,
+    label: 'System',
+    description: locale.value === 'zh' 
+      ? '系统网络栈，原生高性能' 
+      : 'System stack, native high performance'
+  },
+  {
+    value: 'lwip' as TunStack,
+    label: 'lwIP',
+    description: locale.value === 'zh' 
+      ? '轻量级网络栈，低资源占用' 
+      : 'Lightweight stack, low resource usage'
+  }
+])
+
 const icons = {
-  tcpFastOpen: 'M13 10V3L4 14h7v7l9-11h-7z',
   bandwidth: 'M13 7h8m0 0v8m0-8l-8 8-4-4-6 6',
   quic: 'M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636',
   ipv6: 'M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9',
+  tunStack: 'M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z',
 }
 
 // 验证带宽值
@@ -76,12 +113,6 @@ async function triggerReconnect() {
   }
 }
 
-// TCP Fast Open 切换
-async function toggleTcpFastOpen() {
-  settingsStore.updateSettings({ enableTcpFastOpen: !settings.value.enableTcpFastOpen })
-  await triggerReconnect()
-}
-
 // Block QUIC 切换
 async function toggleBlockQuic() {
   settingsStore.updateSettings({ blockQuic: !settings.value.blockQuic })
@@ -93,6 +124,18 @@ async function toggleDisableIpv6() {
   settingsStore.updateSettings({ disableIpv6: !settings.value.disableIpv6 })
   // 只有在 TUN 模式下才需要重连
   if (settings.value.connectionMode === 'tun') {
+    await triggerReconnect()
+  }
+}
+
+// TUN 网络栈切换
+// **Feature: vpn-pure-mode**
+// **Validates: Requirements 8.1, 8.4**
+async function handleTunStackChange(stack: string | number) {
+  settingsStore.setTunStack(stack as TunStack)
+  // 只有在 TUN 模式下才需要重连
+  if (settings.value.connectionMode === 'tun') {
+    notification.info(texts.value.requiresReconnect)
     await triggerReconnect()
   }
 }
@@ -134,6 +177,23 @@ async function handleDownMbpsBlur() {
     await triggerReconnect()
   }
 }
+
+/**
+ * 重置高级网络设置为默认值
+ * 
+ * **Feature: vpn-pure-mode**
+ * **Validates: Requirements 10.4**
+ */
+async function resetAdvancedSettings() {
+  settingsStore.resetAdvancedSettings()
+  // 同步输入框
+  upMbpsInput.value = settings.value.upMbps.toString()
+  downMbpsInput.value = settings.value.downMbps.toString()
+  upMbpsError.value = ''
+  downMbpsError.value = ''
+  notification.success(locale.value === 'zh' ? '高级网络设置已重置' : 'Advanced network settings reset')
+  await triggerReconnect()
+}
 </script>
 
 <template>
@@ -144,16 +204,24 @@ async function handleDownMbpsBlur() {
     <div
       class="bg-[var(--vpn-card)] border border-[var(--vpn-border)] rounded-xl overflow-hidden shadow-sm divide-y divide-[var(--vpn-border)]">
 
-      <!-- TCP Fast Open -->
-      <SettingRow :icon="icons.tcpFastOpen" icon-color="text-yellow-500" icon-bg="bg-yellow-500/10"
-        :title="texts.tcpFastOpen" :subtitle="texts.tcpFastOpenDesc">
-        <SettingSwitch :model-value="settings.enableTcpFastOpen" @update:model-value="toggleTcpFastOpen" />
+      <!-- TUN Stack Selection -->
+      <!-- **Feature: vpn-pure-mode** -->
+      <!-- **Validates: Requirements 8.1, 8.3, 8.4, 10.2, 10.3** -->
+      <SettingRow :icon="icons.tunStack" icon-color="text-cyan-500" icon-bg="bg-cyan-500/10"
+        :title="texts.tunStack" :subtitle="texts.tunStackDesc" :default-value="texts.defaultGvisor" :requires-reconnect="true">
+        <SettingSelect
+          :model-value="settings.tunStack"
+          :options="tunStackOptions"
+          @update:model-value="handleTunStackChange"
+        />
       </SettingRow>
 
       <!-- Upload Bandwidth -->
+      <!-- **Feature: vpn-pure-mode** -->
+      <!-- **Validates: Requirements 10.2, 10.3** -->
       <div>
         <SettingRow :icon="icons.bandwidth" icon-color="text-green-500" icon-bg="bg-green-500/10"
-          :title="texts.upMbps">
+          :title="texts.upMbps" :subtitle="texts.upMbpsDesc" :default-value="texts.defaultUp" :requires-reconnect="true">
           <div class="flex items-center gap-2">
             <input v-model="upMbpsInput" type="text" inputmode="numeric"
               @blur="handleUpMbpsBlur"
@@ -171,9 +239,11 @@ async function handleDownMbpsBlur() {
       </div>
 
       <!-- Download Bandwidth -->
+      <!-- **Feature: vpn-pure-mode** -->
+      <!-- **Validates: Requirements 10.2, 10.3** -->
       <div>
         <SettingRow :icon="icons.bandwidth" icon-color="text-blue-500" icon-bg="bg-blue-500/10"
-          :title="texts.downMbps">
+          :title="texts.downMbps" :subtitle="texts.downMbpsDesc" :default-value="texts.defaultDown" :requires-reconnect="true">
           <div class="flex items-center gap-2">
             <input v-model="downMbpsInput" type="text" inputmode="numeric"
               @blur="handleDownMbpsBlur"
@@ -191,17 +261,33 @@ async function handleDownMbpsBlur() {
       </div>
 
       <!-- Block QUIC -->
+      <!-- **Feature: vpn-pure-mode** -->
+      <!-- **Validates: Requirements 10.2, 10.3** -->
       <SettingRow :icon="icons.quic" icon-color="text-red-500" icon-bg="bg-red-500/10"
-        :title="texts.blockQuic" :subtitle="texts.blockQuicDesc">
+        :title="texts.blockQuic" :subtitle="texts.blockQuicDesc" :default-value="texts.defaultOn" :requires-reconnect="true">
         <SettingSwitch :model-value="settings.blockQuic" @update:model-value="toggleBlockQuic" />
       </SettingRow>
 
       <!-- Disable IPv6 -->
+      <!-- **Feature: vpn-pure-mode** -->
+      <!-- **Validates: Requirements 10.2, 10.3** -->
       <SettingRow :icon="icons.ipv6" icon-color="text-purple-500" icon-bg="bg-purple-500/10"
-        :title="texts.disableIpv6" :subtitle="texts.disableIpv6Desc">
+        :title="texts.disableIpv6" :subtitle="texts.disableIpv6Desc" :default-value="texts.defaultOn" :requires-reconnect="true">
         <SettingSwitch :model-value="settings.disableIpv6" @update:model-value="toggleDisableIpv6" />
       </SettingRow>
 
+    </div>
+    
+    <!-- 重置高级网络设置按钮 -->
+    <!-- **Feature: vpn-pure-mode** -->
+    <!-- **Validates: Requirements 10.4** -->
+    <div class="mt-3 flex justify-end">
+      <button
+        @click="resetAdvancedSettings"
+        class="px-3 py-1.5 text-[11px] text-[var(--vpn-muted)] hover:text-[var(--vpn-text)] bg-[var(--vpn-input-bg)] hover:bg-[var(--vpn-border)] border border-[var(--vpn-border)] rounded-lg transition-colors"
+      >
+        {{ locale === 'zh' ? '重置高级设置' : 'Reset Advanced Settings' }}
+      </button>
     </div>
   </section>
 </template>

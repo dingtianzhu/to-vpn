@@ -11,7 +11,7 @@ const vpnStore = useVpnStore()
 const i18nStore = useI18nStore()
 
 const { settings } = storeToRefs(settingsStore)
-const { t } = storeToRefs(i18nStore)
+const { t, locale } = storeToRefs(i18nStore)
 
 const isLocalSwitching = ref(false)
 const switchError = ref<string | null>(null)
@@ -27,16 +27,23 @@ const modes = computed<ModeOption[]>(() => [
   {
     value: 'socks',
     label: t.value.settings.socksMode,
-    description: t.value.settings.proxyOnly,
+    description: locale.value === 'zh' 
+      ? '仅代理配置了代理的应用，系统其他流量不受影响' 
+      : 'Only proxy configured apps, other traffic unaffected',
     color: 'text-blue-600 dark:text-blue-400'
   },
   {
     value: 'tun',
     label: t.value.settings.tunMode,
-    description: t.value.settings.globalRoute,
+    description: locale.value === 'zh' 
+      ? '全局接管系统网络，所有流量通过 VPN（需要管理员权限）' 
+      : 'Global network takeover, all traffic through VPN (requires admin)',
     color: 'text-emerald-600 dark:text-emerald-400'
   }
 ])
+
+// 默认值文本
+const defaultText = computed(() => locale.value === 'zh' ? '默认: SOCKS' : 'Default: SOCKS')
 
 const progressText = computed(() => {
   const progress = vpnStore.modeSwitchProgress
@@ -88,9 +95,14 @@ async function selectMode(mode: ConnectionMode) {
 
 <template>
   <section>
-    <h2 class="text-[11px] font-semibold text-[var(--vpn-muted)] uppercase tracking-wider mb-2 pl-2">
-      {{ t.settings.connectionMode }}
-    </h2>
+    <div class="flex items-center justify-between mb-2 pl-2">
+      <h2 class="text-[11px] font-semibold text-[var(--vpn-muted)] uppercase tracking-wider">
+        {{ t.settings.connectionMode }}
+      </h2>
+      <span class="text-[9px] font-mono bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 px-1.5 py-0.5 rounded">
+        {{ defaultText }}
+      </span>
+    </div>
     <div class="bg-[var(--vpn-card)] border border-[var(--vpn-border)] rounded-xl overflow-hidden shadow-sm grid grid-cols-2 p-1 gap-1">
       <button 
         v-for="mode in modes" 
