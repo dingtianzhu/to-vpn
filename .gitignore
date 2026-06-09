@@ -81,6 +81,7 @@ out/
 .tmp/
 .cache/
 .cache-loader/
+cache.db
 
 ############################
 # Coverage / Test
