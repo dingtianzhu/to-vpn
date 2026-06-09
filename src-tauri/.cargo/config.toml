@@ -1,0 +1,14 @@
+# Cargo 配置 - 禁用代理
+# 这个文件用于覆盖系统级别的代理设置
+
+[http]
+# 不使用代理
+proxy = ""
+
+[https]
+# 不使用代理  
+proxy = ""
+
+[net]
+# 使用 git cli 而不是内置的 git 库（可能有助于绕过代理问题）
+git-fetch-with-cli = true

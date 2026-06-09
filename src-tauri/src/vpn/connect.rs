@@ -193,6 +193,12 @@ pub async fn connect_hysteria(
     emit_status_change(&app_handle, &state);
     state.set_server_id(Some(server_id));
 
+    // 保存当前的端口号到全局状态
+    let socks_port_u16 = socks_port.unwrap_or(constants::DEFAULT_SOCKS_PORT);
+    let http_port_u16 = http_port.unwrap_or(constants::DEFAULT_HTTP_PORT);
+    state.socks_port.store(socks_port_u16, Ordering::SeqCst);
+    state.http_port.store(http_port_u16, Ordering::SeqCst);
+
     match do_connect(&app_handle, &state, &config, &options, &proxy_ports).await {
         Ok(_) => {
             state.set_status(VpnStatusEnum::Connected);
@@ -270,18 +276,21 @@ fn fast_cleanup_before_connect(_app_handle: &AppHandle, state: &VpnState) {
     stop_watchdog(state);
     stop_monitor(state);
     
+    let prev_socks_port = state.socks_port.load(Ordering::SeqCst);
+    let prev_http_port = state.http_port.load(Ordering::SeqCst);
+
     // **Feature: vpn-enhancement**
     // **Validates: Requirements 1.2, 1.4 - 同时清除 SOCKS 和 HTTP 代理**
-    platform::set_system_proxy(false);
+    platform::set_system_proxy(false, prev_socks_port, prev_http_port);
     platform::force_cleanup();
     state.reset();
 
     std::thread::sleep(Duration::from_millis(500));
 
-    if !is_port_free(constants::DEFAULT_SOCKS_PORT) {
+    if !is_port_free(prev_socks_port) {
         warn!(
             "Port {} still occupied after cleanup",
-            constants::DEFAULT_SOCKS_PORT
+            prev_socks_port
         );
     }
 
@@ -294,9 +303,12 @@ fn fast_cleanup_connection(app_handle: &AppHandle, state: &VpnState, is_user_act
     stop_watchdog(state);
     stop_monitor(state);
     
+    let current_socks_port = state.socks_port.load(Ordering::SeqCst);
+    let current_http_port = state.http_port.load(Ordering::SeqCst);
+
     // **Feature: vpn-enhancement**
     // **Validates: Requirements 1.2, 1.4 - 同时清除 SOCKS 和 HTTP 代理**
-    platform::set_system_proxy(false);
+    platform::set_system_proxy(false, current_socks_port, current_http_port);
     
     // 恢复系统网络状态（DNS、路由、IPv6）
     #[cfg(target_os = "macos")]
@@ -442,7 +454,7 @@ async fn do_connect(
 
         // **Feature: vpn-enhancement**
         // **Validates: Requirements 1.2, 1.4 - TUN 模式不需要系统代理**
-        platform::set_system_proxy(false);
+        platform::set_system_proxy(false, ports.socks_port, ports.http_port);
         
         // 根据用户设置禁用系统 IPv6 以防止泄漏
         #[cfg(target_os = "macos")]
@@ -480,7 +492,7 @@ async fn do_connect(
     state.set_child(child);
 
     info!("Waiting for SOCKS port...");
-    if !wait_for_port_ready(constants::DEFAULT_SOCKS_PORT, 8000) {
+    if !wait_for_port_ready(ports.socks_port, 8000) {
         error!("SOCKS port not ready");
         if let Some(child) = state.take_child() {
             let _ = child.kill();
@@ -490,13 +502,13 @@ async fn do_connect(
 
     info!("Verifying SOCKS proxy...");
     std::thread::sleep(Duration::from_millis(200));
-    if !verify_socks_proxy_working(constants::DEFAULT_SOCKS_PORT) {
+    if !verify_socks_proxy_working(ports.socks_port) {
         warn!("SOCKS proxy verification failed, but process seems running");
     }
 
     // **Feature: vpn-enhancement**
     // **Validates: Requirements 1.2, 1.4 - 同时设置 SOCKS 和 HTTP 代理**
-    platform::set_system_proxy(true);
+    platform::set_system_proxy(true, ports.socks_port, ports.http_port);
 
     let user_disconnect = state.get_user_disconnect_flag();
     let app = app_handle.clone();

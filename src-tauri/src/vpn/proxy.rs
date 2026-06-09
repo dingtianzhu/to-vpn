@@ -4,7 +4,7 @@ use std::process::Command;
 const DEFAULT_NETWORK_SERVICE: &str = "Wi-Fi";
 
 /// 设置系统 SOCKS 代理
-pub fn set_system_socks_proxy(enable: bool) {
+pub fn set_system_socks_proxy(enable: bool, port: u16) {
     if !cfg!(target_os = "macos") {
         return;
     }
@@ -14,24 +14,26 @@ pub fn set_system_socks_proxy(enable: bool) {
         get_active_network_service().unwrap_or_else(|| DEFAULT_NETWORK_SERVICE.to_string());
 
     if enable {
-        println!(">>> Enabling macOS System SOCKS Proxy (127.0.0.1:1080)...");
+        println!(">>> Enabling macOS System SOCKS Proxy (127.0.0.1:{})...", port);
 
         // 设置 SOCKS 代理地址和端口
-        let _ = Command::new("networksetup")
-            .args(["-setsocksfirewallproxy", &service_name, "127.0.0.1", "1080"])
+        let _ = Command::new("/usr/bin/sudo")
+            .args(["-n", "-k", "/usr/sbin/networksetup", "-setsocksfirewallproxy", &service_name, "127.0.0.1", &port.to_string()])
             .output();
 
         // 启用 SOCKS 代理
-        let _ = Command::new("networksetup")
-            .args(["-setsocksfirewallproxystate", &service_name, "on"])
+        let _ = Command::new("/usr/bin/sudo")
+            .args(["-n", "-k", "/usr/sbin/networksetup", "-setsocksfirewallproxystate", &service_name, "on"])
             .output();
     } else {
-        println!(">>> Disabling macOS System SOCKS Proxy...");
+        if is_proxy_enabled("socks", &service_name) {
+            println!(">>> Disabling macOS System SOCKS Proxy...");
 
-        // 禁用 SOCKS 代理
-        let _ = Command::new("networksetup")
-            .args(["-setsocksfirewallproxystate", &service_name, "off"])
-            .output();
+            // 禁用 SOCKS 代理
+            let _ = Command::new("/usr/bin/sudo")
+                .args(["-n", "-k", "/usr/sbin/networksetup", "-setsocksfirewallproxystate", &service_name, "off"])
+                .output();
+        }
     }
 }
 
@@ -39,7 +41,7 @@ pub fn set_system_socks_proxy(enable: bool) {
 /// 
 /// **Feature: vpn-enhancement**
 /// **Validates: Requirements 1.2, 1.4 - 同时配置 SOCKS 和 HTTP 代理**
-pub fn set_system_http_proxy(enable: bool) {
+pub fn set_system_http_proxy(enable: bool, port: u16) {
     if !cfg!(target_os = "macos") {
         return;
     }
@@ -49,40 +51,68 @@ pub fn set_system_http_proxy(enable: bool) {
         get_active_network_service().unwrap_or_else(|| DEFAULT_NETWORK_SERVICE.to_string());
 
     if enable {
-        println!(">>> Enabling macOS System HTTP Proxy (127.0.0.1:1087)...");
+        println!(">>> Enabling macOS System HTTP Proxy (127.0.0.1:{})...", port);
 
         // 设置 HTTP 代理地址和端口
-        let _ = Command::new("networksetup")
-            .args(["-setwebproxy", &service_name, "127.0.0.1", "1087"])
+        let _ = Command::new("/usr/bin/sudo")
+            .args(["-n", "-k", "/usr/sbin/networksetup", "-setwebproxy", &service_name, "127.0.0.1", &port.to_string()])
             .output();
 
         // 启用 HTTP 代理
-        let _ = Command::new("networksetup")
-            .args(["-setwebproxystate", &service_name, "on"])
+        let _ = Command::new("/usr/bin/sudo")
+            .args(["-n", "-k", "/usr/sbin/networksetup", "-setwebproxystate", &service_name, "on"])
             .output();
 
         // 设置 HTTPS 代理地址和端口
-        let _ = Command::new("networksetup")
-            .args(["-setsecurewebproxy", &service_name, "127.0.0.1", "1087"])
+        let _ = Command::new("/usr/bin/sudo")
+            .args(["-n", "-k", "/usr/sbin/networksetup", "-setsecurewebproxy", &service_name, "127.0.0.1", &port.to_string()])
             .output();
 
         // 启用 HTTPS 代理
-        let _ = Command::new("networksetup")
-            .args(["-setsecurewebproxystate", &service_name, "on"])
+        let _ = Command::new("/usr/bin/sudo")
+            .args(["-n", "-k", "/usr/sbin/networksetup", "-setsecurewebproxystate", &service_name, "on"])
             .output();
     } else {
-        println!(">>> Disabling macOS System HTTP/HTTPS Proxy...");
+        let has_http = is_proxy_enabled("http", &service_name);
+        let has_https = is_proxy_enabled("https", &service_name);
+        if has_http || has_https {
+            println!(">>> Disabling macOS System HTTP/HTTPS Proxy...");
 
-        // 禁用 HTTP 代理
-        let _ = Command::new("networksetup")
-            .args(["-setwebproxystate", &service_name, "off"])
-            .output();
+            if has_http {
+                // 禁用 HTTP 代理
+                let _ = Command::new("/usr/bin/sudo")
+                    .args(["-n", "-k", "/usr/sbin/networksetup", "-setwebproxystate", &service_name, "off"])
+                    .output();
+            }
 
-        // 禁用 HTTPS 代理
-        let _ = Command::new("networksetup")
-            .args(["-setsecurewebproxystate", &service_name, "off"])
-            .output();
+            if has_https {
+                // 禁用 HTTPS 代理
+                let _ = Command::new("/usr/bin/sudo")
+                    .args(["-n", "-k", "/usr/sbin/networksetup", "-setsecurewebproxystate", &service_name, "off"])
+                    .output();
+            }
+        }
     }
+}
+
+/// 检查代理是否已启用 (仅限 macOS)
+fn is_proxy_enabled(proxy_type: &str, service: &str) -> bool {
+    let arg = match proxy_type {
+        "socks" => "-getsocksfirewallproxy",
+        "http" => "-getwebproxy",
+        "https" => "-getsecurewebproxy",
+        _ => return false,
+    };
+    if let Ok(output) = Command::new("/usr/sbin/networksetup")
+        .args([arg, service])
+        .output()
+    {
+        if output.status.success() {
+            let s = String::from_utf8_lossy(&output.stdout);
+            return s.contains("Enabled: Yes");
+        }
+    }
+    false
 }
 
 /// 设置代理绕过列表（Bypass Domains）
@@ -97,13 +127,13 @@ pub fn set_proxy_bypass_domains(enable: bool) {
         get_active_network_service().unwrap_or_else(|| DEFAULT_NETWORK_SERVICE.to_string());
 
     if enable {
-        // 设置绕过代理的域名列表
+        // 设置绕过代理 of 域名列表
         // localhost, 127.0.0.1, 本地网络等不走代理
         let bypass_domains = "localhost,127.0.0.1,*.local,*.lan,10.*,172.16.*,172.17.*,172.18.*,172.19.*,172.20.*,172.21.*,172.22.*,172.23.*,172.24.*,172.25.*,172.26.*,172.27.*,172.28.*,172.29.*,172.30.*,172.31.*,192.168.*";
         
         println!(">>> Setting proxy bypass domains...");
-        let _ = Command::new("networksetup")
-            .args(["-setproxybypassdomains", &service_name, bypass_domains])
+        let _ = Command::new("/usr/bin/sudo")
+            .args(["-n", "-k", "/usr/sbin/networksetup", "-setproxybypassdomains", &service_name, bypass_domains])
             .output();
     }
     // 禁用时不需要清除，因为代理本身已经关闭
@@ -113,9 +143,9 @@ pub fn set_proxy_bypass_domains(enable: bool) {
 /// 
 /// **Feature: vpn-enhancement**
 /// **Validates: Requirements 1.2, 1.4 - 同时设置/清除 SOCKS 和 HTTP 代理**
-pub fn set_system_proxy(enable: bool) {
-    set_system_socks_proxy(enable);
-    set_system_http_proxy(enable);
+pub fn set_system_proxy(enable: bool, socks_port: u16, http_port: u16) {
+    set_system_socks_proxy(enable, socks_port);
+    set_system_http_proxy(enable, http_port);
     if enable {
         set_proxy_bypass_domains(true);
     }

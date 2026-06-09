@@ -178,10 +178,10 @@ pub fn generate_with_ports(
         route_rules.push(json!({ "port": webrtc_ports, "network": "udp", "action": "reject" }));
         info!("WebRTC blocking enabled: blocking UDP ports {:?}", webrtc_ports);
         
-        // 阻断 WebRTC 相关域名
+        // 阻断 WebRTC 相关域名 - 使用精确匹配（domain）而非后缀匹配（domain_suffix）
         let webrtc_domains = get_webrtc_domains();
-        route_rules.push(json!({ "domain_suffix": webrtc_domains, "action": "reject" }));
-        info!("WebRTC blocking: blocking {} domains", webrtc_domains.len());
+        route_rules.push(json!({ "domain": webrtc_domains, "action": "reject" }));
+        info!("WebRTC blocking: blocking {} STUN/TURN domains", webrtc_domains.len());
     }
 
     if !server_ips.is_empty() {

@@ -73,15 +73,29 @@ pub fn generate_with_options(
         TunStack::Gvisor => "gvisor",
     };
     info!("TUN stack: {}", tun_stack);
+
+    #[cfg(target_os = "macos")]
+    let auto_route = true;
+    #[cfg(target_os = "macos")]
+    let strict_route = true;
+    #[cfg(target_os = "macos")]
+    let final_stack = tun_stack;
+
+    #[cfg(not(target_os = "macos"))]
+    let auto_route = true;
+    #[cfg(not(target_os = "macos"))]
+    let strict_route = true;
+    #[cfg(not(target_os = "macos"))]
+    let final_stack = tun_stack;
     
     let inbounds = json!([{
         "type": "tun",
         "tag": "tun-in",
         "address": tun_addresses,
         "mtu": mtu,
-        "auto_route": true,
-        "strict_route": true,
-        "stack": tun_stack,
+        "auto_route": auto_route,
+        "strict_route": strict_route,
+        "stack": final_stack,
         "sniff": true,
         "sniff_override_destination": true,
         "platform": {
@@ -110,6 +124,8 @@ pub fn generate_with_options(
         let mut dns_rules = vec![
             // DNS 泄漏检测域名必须走远程 DNS，防止泄露真实 IP
             json!({ "domain": get_dns_leak_test_domains(), "server": "remote-dns" }),
+            // 解决 DNS 解析死锁：sing-box 自身发起的 DNS 请求由 local-dns 直连解析
+            json!({ "outbound": "any", "server": "local-dns" }),
             // 只有明确的本地域名走本地 DNS
             json!({ "domain_suffix": [".lan", ".local", ".home", ".internal", ".localhost"], "server": "local-dns" }),
         ];
@@ -124,7 +140,8 @@ pub fn generate_with_options(
                 { 
                     "tag": "remote-dns", 
                     "address": remote_dns_addr, 
-                    "detour": "proxy"
+                    "detour": "proxy",
+                    "address_resolver": "local-dns"
                 },
                 { 
                     "tag": "local-dns", 
@@ -153,7 +170,8 @@ pub fn generate_with_options(
                 { 
                     "tag": "remote-dns", 
                     "address": remote_dns_addr, 
-                    "detour": "proxy"
+                    "detour": "proxy",
+                    "address_resolver": "local-dns"
                 },
                 { 
                     "tag": "local-dns", 
@@ -166,6 +184,8 @@ pub fn generate_with_options(
                 }
             ],
             "rules": [
+                // 解决 DNS 解析死锁：sing-box 自身发起的 DNS 请求由 local-dns 直连解析
+                { "outbound": "any", "server": "local-dns" },
                 // 本地域名走本地 DNS
                 { "domain_suffix": [".lan", ".local", ".home", ".internal", ".localhost"], "server": "local-dns" },
                 // .cn 域名走本地 DNS
@@ -215,16 +235,17 @@ pub fn generate_with_options(
     // **Feature: vpn-pure-mode**
     // **Validates: Requirements 6.2, 6.3 - WebRTC 阻断**
     // 阻断 STUN/TURN 端口和 WebRTC 相关域名，防止浏览器通过 WebRTC 泄露真实 IP
+    // 注意：使用精确域名匹配（domain）而非后缀匹配（domain_suffix），避免误伤正常服务
     if options.block_webrtc {
         // 阻断 STUN/TURN 端口 (3478, 5349, 19302)
         let webrtc_ports = get_webrtc_ports();
         route_rules.push(json!({ "port": webrtc_ports, "network": "udp", "action": "reject" }));
         info!("WebRTC blocking enabled: blocking UDP ports {:?}", webrtc_ports);
         
-        // 阻断 WebRTC 相关域名
+        // 阻断 WebRTC 相关域名 - 使用精确匹配（domain）而非后缀匹配（domain_suffix）
         let webrtc_domains = get_webrtc_domains();
-        route_rules.push(json!({ "domain_suffix": webrtc_domains, "action": "reject" }));
-        info!("WebRTC blocking: blocking {} domains", webrtc_domains.len());
+        route_rules.push(json!({ "domain": webrtc_domains, "action": "reject" }));
+        info!("WebRTC blocking: blocking {} STUN/TURN domains", webrtc_domains.len());
     }
     
     // **Feature: vpn-pure-mode**

@@ -32,6 +32,12 @@ const filteredServers = computed(() => {
 
 // 处理服务器选择
 async function handleServerSelect(serverId: number) {
+  // 安全检查：如果服务器不可用，则不允许选择
+  const targetServer = sortedServers.value.find(s => s.id === serverId)
+  if (!targetServer || targetServer.status !== 'online') {
+    return
+  }
+
   const isSameServer = serverId === currentServerId.value
 
   // 选择新服务器

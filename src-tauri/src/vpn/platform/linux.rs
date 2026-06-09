@@ -200,3 +200,34 @@ fn detect_desktop_environment() -> Option<String> {
     std::env::var("XDG_CURRENT_DESKTOP").ok()
 }
 
+/// 恢复 Linux 网络状态
+/// 
+/// 在应用启动时调用，清理可能残留的代理和网络设置
+/// 
+/// **Feature: vpn-pure-mode**
+/// **Validates: Requirements - 启动时恢复网络状态**
+pub fn restore_network_state_linux() {
+    println!(">>> Restoring Linux network state...");
+    
+    // 1. 禁用系统代理
+    set_system_proxy(false);
+    
+    // 2. 清理 TUN 路由
+    cleanup_tun_routes();
+    
+    // 3. 恢复默认网关
+    restore_default_gateway();
+    
+    // 4. 刷新 DNS 缓存（systemd-resolved）
+    let _ = Command::new("systemd-resolve")
+        .args(["--flush-caches"])
+        .output();
+    
+    // 备用：resolvectl
+    let _ = Command::new("resolvectl")
+        .args(["flush-caches"])
+        .output();
+    
+    println!(">>> Linux network state restored");
+}
+

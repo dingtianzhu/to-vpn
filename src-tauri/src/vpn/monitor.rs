@@ -37,9 +37,32 @@ pub fn start_monitor(app_handle: AppHandle, state: &VpnState) {
         // API 可用性标志
         let mut api_available = true;
 
+        // 获取当前的 SOCKS 端口进行监控客户端绑定
+        let socks_port = {
+            let vpn_state = app.state::<VpnState>();
+            vpn_state.socks_port.load(Ordering::SeqCst)
+        };
+
         // 创建 HTTP 客户端（blocking）
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(2))
+            .build()
+            .ok();
+
+        // 创建 SOCKS 代理客户端
+        let proxy_client = reqwest::Proxy::all(format!("socks5://127.0.0.1:{}", socks_port))
+            .ok()
+            .and_then(|proxy| {
+                reqwest::blocking::Client::builder()
+                    .timeout(Duration::from_secs(5))
+                    .proxy(proxy)
+                    .build()
+                    .ok()
+            });
+
+        // 创建直接连接客户端用于 sing-box 延迟 API
+        let direct_client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(5))
             .build()
             .ok();
 
@@ -101,7 +124,7 @@ pub fn start_monitor(app_handle: AppHandle, state: &VpnState) {
 
             // 每 5 秒测量一次延迟
             if tick_count % 5 == 0 {
-                let latency = measure_real_latency(current_api_port);
+                let latency = measure_real_latency(&proxy_client, &direct_client, current_api_port, socks_port);
                 let _ = app.emit(
                     "vpn-latency",
                     LatencyStats {
@@ -137,36 +160,27 @@ fn fetch_traffic_from_api(
 
 /// 测量真实延迟 - 通过代理测试
 /// 失败时返回 -1 (作为 i32 返回，但存储为 u32 时使用特殊值)
-fn measure_real_latency(_port: u16) -> u32 {
+fn measure_real_latency(
+    proxy_client: &Option<reqwest::blocking::Client>,
+    direct_client: &Option<reqwest::blocking::Client>,
+    api_port: u16,
+    _socks_port: u16,
+) -> u32 {
     // 方案 1: 通过 SOCKS 代理测试
-    let proxy = reqwest::Proxy::all(format!(
-        "socks5://127.0.0.1:{}",
-        constants::DEFAULT_SOCKS_PORT
-    ));
-
-    if let Ok(proxy) = proxy {
-        if let Ok(client) = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .proxy(proxy)
-            .build()
-        {
-            let start = Instant::now();
-            if let Ok(response) = client.get("http://www.gstatic.com/generate_204").send() {
-                if response.status().is_success() || response.status().as_u16() == 204 {
-                    return start.elapsed().as_millis() as u32;
-                }
+    if let Some(client) = proxy_client {
+        let start = Instant::now();
+        if let Ok(response) = client.get("http://www.gstatic.com/generate_204").send() {
+            if response.status().is_success() || response.status().as_u16() == 204 {
+                return start.elapsed().as_millis() as u32;
             }
         }
     }
 
     // 方案 2: 通过 sing-box API 测试
-    if let Ok(client) = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-    {
+    if let Some(client) = direct_client {
         let url = format!(
             "http://127.0.0.1:{}/proxies/proxy/delay?timeout=3000&url=http://www.gstatic.com/generate_204",
-            _port
+            api_port
         );
 
         if let Ok(response) = client.get(&url).send() {

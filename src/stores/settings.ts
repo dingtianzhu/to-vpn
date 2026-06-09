@@ -12,7 +12,7 @@ const DEFAULT_SETTINGS: VpnSettings = {
   // 高级网络设置
   upMbps: 500,              // 默认上行带宽限制
   downMbps: 1000,           // 默认下行带宽限制
-  blockQuic: true,          // 默认阻断 QUIC
+  blockQuic: false,         // 默认不阻断 QUIC（避免 Google 等网站加载问题）
   disableIpv6: true,        // 默认禁用 IPv6（防止泄漏）
   
   // P0: 代理端口配置
@@ -33,7 +33,7 @@ const DEFAULT_SETTINGS: VpnSettings = {
   customProxyDomains: [],   // 强制代理域名列表
   
   // P2: WebRTC 阻断
-  blockWebRTC: true,        // 默认启用 WebRTC 阻断
+  blockWebRTC: false,       // 默认不阻断 WebRTC（避免视频通话等问题）
   
   // P2: 分应用代理
   excludedApps: [],         // 排除的应用

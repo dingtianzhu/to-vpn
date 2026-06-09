@@ -47,6 +47,9 @@ const translations = {
       load: "Load",
       empty: "No servers found",
       refresh: "Refresh Latency",
+      available: "Available",
+      cannotConnect: "Cannot Connect",
+      maintenance: "Maintenance",
     },
     logs: {
       title: "Console",
@@ -281,6 +284,9 @@ const translations = {
       load: "负载",
       empty: "未找到服务器",
       refresh: "刷新延迟",
+      available: "可连接",
+      cannotConnect: "无法连接",
+      maintenance: "维护中",
     },
     logs: {
       title: "控制台",

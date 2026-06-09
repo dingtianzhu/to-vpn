@@ -1,32 +1,27 @@
 /**
- * 安全存储工具 - 使用 Tauri Store 插件进行加密存储
+ * 安全存储工具 - 使用系统安全钥匙串进行加密存储
  * 用于存储敏感数据如 Token，比 localStorage 更安全
  */
 
-import { Store } from '@tauri-apps/plugin-store'
-
-// 安全存储文件名
-const SECURE_STORE_FILE = 'secure-store.json'
-
-// 存储实例（懒加载）
-let storeInstance: Store | null = null
-
-// 获取存储实例
-async function getStore(): Promise<Store> {
-  if (!storeInstance) {
-    storeInstance = await Store.load(SECURE_STORE_FILE)
-  }
-  return storeInstance
-}
+import { invoke } from '@tauri-apps/api/core'
 
 /**
  * 安全存储 - 获取值
  */
 export async function secureGet<T>(key: string, defaultValue: T): Promise<T> {
   try {
-    const store = await getStore()
-    const value = await store.get<T>(key)
-    return value !== null && value !== undefined ? value : defaultValue
+    const value = await invoke<string>('get_secure_item', { key })
+    if (value === '' || value === null || value === undefined) {
+      return defaultValue
+    }
+    if (typeof defaultValue === 'string') {
+      return value as unknown as T
+    }
+    try {
+      return JSON.parse(value) as T
+    } catch {
+      return value as unknown as T
+    }
   } catch (e) {
     console.error(`Failed to get secure item [${key}]:`, e)
     return defaultValue
@@ -38,9 +33,8 @@ export async function secureGet<T>(key: string, defaultValue: T): Promise<T> {
  */
 export async function secureSet<T>(key: string, value: T): Promise<void> {
   try {
-    const store = await getStore()
-    await store.set(key, value)
-    await store.save()
+    const stringValue = typeof value === 'string' ? value : JSON.stringify(value)
+    await invoke('set_secure_item', { key, value: stringValue })
   } catch (e) {
     console.error(`Failed to set secure item [${key}]:`, e)
   }
@@ -51,9 +45,7 @@ export async function secureSet<T>(key: string, value: T): Promise<void> {
  */
 export async function secureRemove(key: string): Promise<void> {
   try {
-    const store = await getStore()
-    await store.delete(key)
-    await store.save()
+    await invoke('delete_secure_item', { key })
   } catch (e) {
     console.error(`Failed to remove secure item [${key}]:`, e)
   }
@@ -64,9 +56,9 @@ export async function secureRemove(key: string): Promise<void> {
  */
 export async function secureClear(): Promise<void> {
   try {
-    const store = await getStore()
-    await store.clear()
-    await store.save()
+    await secureRemove(SECURE_KEYS.ACCESS_TOKEN)
+    await secureRemove(SECURE_KEYS.REFRESH_TOKEN)
+    await secureRemove(SECURE_KEYS.TOKEN_EXPIRE_AT)
   } catch (e) {
     console.error('Failed to clear secure storage:', e)
   }
@@ -77,9 +69,8 @@ export async function secureClear(): Promise<void> {
  */
 export async function secureHas(key: string): Promise<boolean> {
   try {
-    const store = await getStore()
-    const value = await store.get(key)
-    return value !== null && value !== undefined
+    const value = await invoke<string>('get_secure_item', { key })
+    return value !== '' && value !== null && value !== undefined
   } catch (e) {
     console.error(`Failed to check secure item [${key}]:`, e)
     return false

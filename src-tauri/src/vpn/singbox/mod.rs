@@ -341,21 +341,20 @@ pub fn get_dns_leak_test_domains() -> Vec<&'static str> {
 /// **Validates: Requirements 6.2, 6.3**
 /// 
 /// 这些域名是 WebRTC STUN/TURN 服务器域名，阻断它们可以防止 WebRTC 泄露真实 IP
+/// 注意：只阻断专用的 STUN/TURN 服务器域名，避免影响正常服务
 pub fn get_webrtc_domains() -> Vec<&'static str> {
     vec![
-        // Google STUN/TURN 服务器
+        // Google STUN/TURN 服务器 - 使用精确域名匹配
+        // 注意：不使用通配符，避免误匹配其他 Google 服务
         "stun.l.google.com",
-        ".stun.l.google.com",
         "stun1.l.google.com",
         "stun2.l.google.com",
         "stun3.l.google.com",
         "stun4.l.google.com",
+        // Mozilla STUN
         "stun.services.mozilla.com",
-        ".stun.services.mozilla.com",
-        // Twilio STUN/TURN
+        // Twilio STUN/TURN - 使用精确域名
         "global.stun.twilio.com",
-        ".stun.twilio.com",
-        ".turn.twilio.com",
         // 其他常见 STUN 服务器
         "stun.stunprotocol.org",
         "stun.voip.eutelia.it",
@@ -371,9 +370,6 @@ pub fn get_webrtc_domains() -> Vec<&'static str> {
         "stun.gmx.net",
         "stun.callwithus.com",
         "stun.internetcalls.com",
-        // WebRTC 泄漏检测网站
-        "webrtc-ips.com",
-        ".webrtc-ips.com",
     ]
 }
 

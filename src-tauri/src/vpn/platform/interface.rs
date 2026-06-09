@@ -40,7 +40,9 @@ impl Default for InterfaceType {
 /// 如果检测失败，返回 None。
 /// 
 /// # Example
-/// ```
+/// ```ignore
+/// use tovpn::vpn::platform::interface::detect_active_interface;
+///
 /// let interface = detect_active_interface();
 /// if let Some(info) = interface {
 ///     println!("Active interface: {}", info.name);

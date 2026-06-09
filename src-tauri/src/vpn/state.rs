@@ -1,6 +1,6 @@
 //! VPN 状态管理模块
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -62,6 +62,12 @@ pub struct VpnState {
 
     /// 用户主动断开标志（用于避免“正常断开”被当成崩溃）
     pub user_disconnect: Arc<AtomicBool>,
+
+    /// SOCKS 代理端口
+    pub socks_port: AtomicU16,
+
+    /// HTTP 代理端口
+    pub http_port: AtomicU16,
 }
 
 impl Default for VpnState {
@@ -81,6 +87,8 @@ impl VpnState {
             monitor_running: Arc::new(AtomicBool::new(false)),
             watchdog_running: Arc::new(AtomicBool::new(false)),
             user_disconnect: Arc::new(AtomicBool::new(false)),
+            socks_port: AtomicU16::new(crate::constants::DEFAULT_SOCKS_PORT),
+            http_port: AtomicU16::new(crate::constants::DEFAULT_HTTP_PORT),
         }
     }
 
@@ -134,6 +142,8 @@ impl VpnState {
         // SOCKS 模式后台日志线程用它来判断 Terminated 是否为用户主动断开。
         self.monitor_running.store(false, Ordering::SeqCst);
         self.watchdog_running.store(false, Ordering::SeqCst);
+        self.socks_port.store(crate::constants::DEFAULT_SOCKS_PORT, Ordering::SeqCst);
+        self.http_port.store(crate::constants::DEFAULT_HTTP_PORT, Ordering::SeqCst);
     }
 
     pub fn get_status_result(&self) -> VpnStatusResult {

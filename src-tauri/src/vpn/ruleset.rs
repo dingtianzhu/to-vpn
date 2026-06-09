@@ -10,15 +10,18 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{info, error};
+use tracing::{info, error, warn};
 
 /// 规则集更新检查阈值（7 天）
 const RULESET_UPDATE_THRESHOLD_DAYS: u64 = 7;
 
 /// 规则集下载 URL
 /// 注意：sing-box 1.8+ 使用 rule_set 格式（.srs），需要从 rule-set 分支下载
-const GEOSITE_CN_URL: &str = "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs";
-const GEOIP_CN_URL: &str = "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs";
+const GEOSITE_CN_URL: &str = "https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs";
+const GEOSITE_CN_BACKUP_URL: &str = "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs";
+
+const GEOIP_CN_URL: &str = "https://fastly.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs";
+const GEOIP_CN_BACKUP_URL: &str = "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs";
 
 /// 规则集信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -297,12 +300,12 @@ pub struct RulesetUpdateResult {
 }
 
 /// 下载单个规则集文件
-async fn download_ruleset(url: &str, path: &Path) -> Result<(), String> {
+async fn download_ruleset(url: &str, path: &Path, timeout_secs: u64) -> Result<(), String> {
     info!("Starting download from: {}", url);
     info!("Target path: {:?}", path);
     
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
+        .timeout(std::time::Duration::from_secs(timeout_secs))
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
     
@@ -390,28 +393,46 @@ pub async fn update_rulesets() -> RulesetUpdateResult {
     let mut errors = Vec::new();
     
     // 下载 geosite-cn (域名规则集)
-    info!("Downloading geosite-cn from: {}", GEOSITE_CN_URL);
-    match download_ruleset(GEOSITE_CN_URL, &geosite_cn_path).await {
+    info!("Downloading geosite-cn from primary: {}", GEOSITE_CN_URL);
+    match download_ruleset(GEOSITE_CN_URL, &geosite_cn_path, 15).await {
         Ok(_) => {
             updated_count += 1;
-            info!("geosite-cn (domain ruleset) updated successfully");
+            info!("geosite-cn (domain ruleset) updated successfully via CDN");
         }
-        Err(e) => {
-            error!("Failed to update geosite-cn: {}", e);
-            errors.push(format!("geosite-cn: {}", e));
+        Err(err_cdn) => {
+            warn!("Failed to download geosite-cn via CDN: {}. Retrying via backup...", err_cdn);
+            match download_ruleset(GEOSITE_CN_BACKUP_URL, &geosite_cn_path, 30).await {
+                Ok(_) => {
+                    updated_count += 1;
+                    info!("geosite-cn (domain ruleset) updated successfully via Backup");
+                }
+                Err(err_backup) => {
+                    error!("Failed to update geosite-cn: {}", err_backup);
+                    errors.push(format!("geosite-cn: {}", err_backup));
+                }
+            }
         }
     }
     
     // 下载 geoip-cn (IP 规则集)
-    info!("Downloading geoip-cn from: {}", GEOIP_CN_URL);
-    match download_ruleset(GEOIP_CN_URL, &geoip_cn_path).await {
+    info!("Downloading geoip-cn from primary: {}", GEOIP_CN_URL);
+    match download_ruleset(GEOIP_CN_URL, &geoip_cn_path, 15).await {
         Ok(_) => {
             updated_count += 1;
-            info!("geoip-cn (IP ruleset) updated successfully");
+            info!("geoip-cn (IP ruleset) updated successfully via CDN");
         }
-        Err(e) => {
-            error!("Failed to update geoip-cn: {}", e);
-            errors.push(format!("geoip-cn: {}", e));
+        Err(err_cdn) => {
+            warn!("Failed to download geoip-cn via CDN: {}. Retrying via backup...", err_cdn);
+            match download_ruleset(GEOIP_CN_BACKUP_URL, &geoip_cn_path, 30).await {
+                Ok(_) => {
+                    updated_count += 1;
+                    info!("geoip-cn (IP ruleset) updated successfully via Backup");
+                }
+                Err(err_backup) => {
+                    error!("Failed to update geoip-cn: {}", err_backup);
+                    errors.push(format!("geoip-cn: {}", err_backup));
+                }
+            }
         }
     }
     

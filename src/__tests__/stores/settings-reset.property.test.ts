@@ -22,7 +22,7 @@ const DEFAULT_VALUES = {
   // 安全设置默认值
   killSwitch: false,
   dnsLeakProtection: true,
-  blockWebRTC: true,
+  blockWebRTC: false,  // 默认关闭，避免视频通话等问题
   
   // 路由设置默认值
   routeMode: 'rule' as RouteMode,
@@ -37,7 +37,7 @@ const DEFAULT_VALUES = {
   mtu: 1400,
   upMbps: 500,
   downMbps: 1000,
-  blockQuic: true,
+  blockQuic: false,    // 默认关闭，避免 Google 等网站加载问题
   disableIpv6: true,
 };
 

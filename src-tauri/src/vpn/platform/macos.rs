@@ -25,12 +25,15 @@ const CMD_ROUTE: &str = "/sbin/route";
 struct TunRuntimeState {
     mode: String,
     started_at: u64,
+    utun: String,
+    default_iface: String,
+    bypass_ips: Vec<String>,
 }
 
 /// 满足 platform 模块导出的代理设置函数
 #[allow(dead_code)]
-pub fn set_system_socks_proxy(enable: bool) {
-    crate::vpn::proxy::set_system_socks_proxy(enable);
+pub fn set_system_socks_proxy(enable: bool, port: u16) {
+    crate::vpn::proxy::set_system_socks_proxy(enable, port);
 }
 
 /// 设置系统 HTTP 代理
@@ -38,16 +41,16 @@ pub fn set_system_socks_proxy(enable: bool) {
 /// **Feature: vpn-enhancement**
 /// **Validates: Requirements 1.2, 1.4**
 #[allow(dead_code)]
-pub fn set_system_http_proxy(enable: bool) {
-    crate::vpn::proxy::set_system_http_proxy(enable);
+pub fn set_system_http_proxy(enable: bool, port: u16) {
+    crate::vpn::proxy::set_system_http_proxy(enable, port);
 }
 
 /// 设置所有系统代理（SOCKS + HTTP）
 /// 
 /// **Feature: vpn-enhancement**
 /// **Validates: Requirements 1.2, 1.4 - 同时设置/清除 SOCKS 和 HTTP 代理**
-pub fn set_system_proxy(enable: bool) {
-    crate::vpn::proxy::set_system_proxy(enable);
+pub fn set_system_proxy(enable: bool, socks_port: u16, http_port: u16) {
+    crate::vpn::proxy::set_system_proxy(enable, socks_port, http_port);
 }
 
 fn sudo_ok(args: &[&str]) -> bool {
@@ -64,6 +67,7 @@ fn sudo_ok(args: &[&str]) -> bool {
 fn can_sudo_run_singbox_nopasswd() -> bool {
     Path::new(SYSTEM_BIN_PATH).exists() && sudo_ok(&[SYSTEM_BIN_PATH, "version"])
 }
+
 
 fn kill_process_by_port(port: u16) {
     let port_str = format!(":{}", port);
@@ -191,6 +195,9 @@ fn wait_port_free(port: u16, timeout_ms: u64) -> bool {
 }
 
 fn quick_kill_singbox() {
+    if !is_singbox_running() {
+        return;
+    }
     kill_process_by_port(1080);
     kill_process_by_port(SINGBOX_API_PORT_TUN);
     kill_process_by_port(SINGBOX_API_PORT_SOCKS);
@@ -203,12 +210,41 @@ fn quick_kill_singbox() {
         .output();
 }
 
+fn parse_utun_from_log(log_file: &str) -> Option<String> {
+    let log = fs::read_to_string(log_file).ok()?;
+    for line in log.lines().rev() {
+        if let Some(pos) = line.rfind("started at ") {
+            let rest = line[(pos + "started at ".len())..].trim();
+            if rest.starts_with("utun") {
+                let name = rest.split_whitespace().next().unwrap_or(rest);
+                return Some(name.to_string());
+            }
+        }
+    }
+    None
+}
+
+
+fn route_delete_host(ip: &str) {
+    let _ = Command::new(CMD_SUDO)
+        .args(["-n", "-k", CMD_ROUTE, "-n", "delete", "-host", ip])
+        .output();
+}
+
+
 pub fn run_singbox_tun_as_root(config_path: &str, log_file: &str) -> Result<(), String> {
     force_cleanup();
 
     if !wait_process_stop(1000) {
         return Err("Failed to stop previous process".into());
     }
+
+    let default_iface = detect_default_interface().unwrap_or_else(|| "en0".to_string());
+    tracing::info!(
+        "Starting sing-box (TUN mode) via sudo bin={} default_iface={}",
+        SYSTEM_BIN_PATH,
+        default_iface
+    );
 
     // 核心修复：在这里定义日志相关的变量
     let (log_handle, actual_log) = prepare_log_file(log_file)?;
@@ -228,12 +264,27 @@ pub fn run_singbox_tun_as_root(config_path: &str, log_file: &str) -> Result<(), 
         return Err(format!("Failed to start: {}", e));
     }
 
+    // 解析 utunX
+    let mut utun = None;
+    for _ in 0..20 {
+        utun = parse_utun_from_log(&actual_log);
+        if utun.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let utun = utun.ok_or("TUN started but utun name not found in log".to_string())?;
+    tracing::info!("TUN interface detected: {}", utun);
+
     let state = TunRuntimeState {
         mode: "tun".to_string(),
         started_at: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs(),
+        utun,
+        default_iface,
+        bypass_ips: Vec::new(),
     };
     let _ = fs::write(
         get_tun_lock_file(),
@@ -249,6 +300,12 @@ pub fn stop_singbox_tun_as_root() -> Result<(), String> {
 }
 
 pub fn force_cleanup() {
+    let singbox_running = is_singbox_running();
+    let lock_exists = get_tun_lock_file().exists();
+    if !singbox_running && !lock_exists {
+        return;
+    }
+
     quick_kill_singbox();
     let _ = wait_process_stop(1000);
 
@@ -256,80 +313,25 @@ pub fn force_cleanup() {
     wait_port_free(SINGBOX_API_PORT_SOCKS, 500);
     wait_port_free(1080, 500);
 
-    let _ = fs::remove_file(get_singbox_pid_file());
-    let _ = fs::remove_file(get_tun_lock_file());
-    
     // 恢复网络状态（DNS、路由、IPv6）
     restore_network_state();
-}
 
-/// 获取当前活动的网络服务名称
-fn get_active_network_service() -> Option<String> {
-    let output = Command::new("networksetup")
-        .args(["-listallnetworkservices"])
-        .output()
-        .ok()?;
-
-    let services = String::from_utf8_lossy(&output.stdout);
-
-    for line in services.lines().skip(1) {
-        if line.starts_with('*') {
-            continue;
-        }
-        let name = line.trim();
-        if name.contains("Wi-Fi") || name.contains("Ethernet") {
-            return Some(name.to_string());
-        }
-    }
-    for line in services.lines().skip(1) {
-        if !line.starts_with('*') {
-            return Some(line.trim().to_string());
-        }
-    }
-    None
+    let _ = fs::remove_file(get_singbox_pid_file());
+    let _ = fs::remove_file(get_tun_lock_file());
 }
 
 /// 设置系统 IPv6 状态
 /// 
-/// 在 TUN 模式下禁用 IPv6 以防止泄漏
-/// 断开时恢复 IPv6
-pub fn set_system_ipv6(enable: bool) {
-    let service_name = match get_active_network_service() {
-        Some(name) => name,
-        None => "Wi-Fi".to_string(),
-    };
-
-    if enable {
-        println!(">>> Enabling IPv6 on {}...", service_name);
-        let _ = Command::new("networksetup")
-            .args(["-setv6automatic", &service_name])
-            .output();
-    } else {
-        println!(">>> Disabling IPv6 on {} to prevent leaks...", service_name);
-        let _ = Command::new("networksetup")
-            .args(["-setv6off", &service_name])
-            .output();
-    }
+/// 移除了 networksetup 命令行调用，避免密码弹窗，保留纯函数签名
+pub fn set_system_ipv6(_enable: bool) {
+    // No-op to avoid sudo/networksetup password prompt popups
 }
 
 /// 恢复系统 DNS 设置
 /// 
-/// VPN 断开时调用，将 DNS 恢复为 DHCP 自动获取
-/// 防止 DNS 残留导致断开后无法上网
+/// 移除了 networksetup 命令行调用，仅保留本地 DNS 缓存刷新操作
 pub fn restore_system_dns() {
-    let service_name = match get_active_network_service() {
-        Some(name) => name,
-        None => "Wi-Fi".to_string(),
-    };
-
-    println!(">>> Restoring DNS to automatic on {}...", service_name);
-    
-    // 设置为 "empty" 表示使用 DHCP 自动获取的 DNS
-    let _ = Command::new("networksetup")
-        .args(["-setdnsservers", &service_name, "empty"])
-        .output();
-
-    // 刷新 DNS 缓存
+    // 刷新 DNS 缓存（标准用户权限允许）
     let _ = Command::new("dscacheutil")
         .args(["-flushcache"])
         .output();
@@ -340,72 +342,21 @@ pub fn restore_system_dns() {
 
 /// 清理残留路由表
 /// 
-/// 删除指向 utun 接口的默认路由，恢复正常网络
+/// 删除指向 utun 接口 of the default route, 恢复正常网络
 pub fn cleanup_routes() {
     println!(">>> Cleaning up routes...");
     
-    // 获取当前默认网关
-    let gateway = get_default_gateway();
-    
-    // 删除可能残留的 utun 路由
-    for i in 0..10 {
-        let utun = format!("utun{}", i);
-        let _ = Command::new(CMD_SUDO)
-            .args(["-n", "-k", CMD_ROUTE, "delete", "default", "-ifscope", &utun])
-            .output();
-    }
-    
-    // 如果有默认网关，确保默认路由指向它
-    if let Some(gw) = gateway {
-        println!(">>> Restoring default route to {}...", gw);
-        // 先删除可能错误的默认路由
-        let _ = Command::new(CMD_SUDO)
-            .args(["-n", "-k", CMD_ROUTE, "delete", "default"])
-            .output();
-        // 添加正确的默认路由
-        let _ = Command::new(CMD_SUDO)
-            .args(["-n", "-k", CMD_ROUTE, "add", "default", &gw])
-            .output();
+    // 清理我们自己加的路由
+    if let Ok(s) = fs::read_to_string(get_tun_lock_file()) {
+        if let Ok(st) = serde_json::from_str::<TunRuntimeState>(&s) {
+            for ip in st.bypass_ips {
+                route_delete_host(&ip);
+            }
+        }
     }
 }
 
 /// 获取当前默认网关（从 en0 接口）
-fn get_default_gateway() -> Option<String> {
-    let output = Command::new(CMD_ROUTE)
-        .args(["-n", "get", "default"])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let s = String::from_utf8_lossy(&output.stdout);
-    for line in s.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix("gateway:") {
-            return Some(rest.trim().to_string());
-        }
-    }
-    
-    // 如果找不到，尝试从 netstat 获取
-    if let Ok(output) = Command::new("netstat")
-        .args(["-rn"])
-        .output()
-    {
-        let s = String::from_utf8_lossy(&output.stdout);
-        for line in s.lines() {
-            if line.contains("default") && line.contains("en0") && !line.contains("utun") {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    return Some(parts[1].to_string());
-                }
-            }
-        }
-    }
-    
-    None
-}
 
 /// 完整的网络状态恢复
 /// 

@@ -31,9 +31,15 @@ fn icmp_ping(host: &str, timeout_ms: u64) -> i32 {
         .output();
     
     #[cfg(target_os = "windows")]
-    let output = Command::new("ping")
-        .args(["-n", "1", "-w", &(timeout_ms).to_string(), host])
-        .output();
+    let output = {
+        let mut cmd = Command::new("ping");
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+        cmd.args(["-n", "1", "-w", &(timeout_ms).to_string(), host]).output()
+    };
     
     match output {
         Ok(out) if out.status.success() => {

@@ -124,16 +124,17 @@ pub fn generate_with_options(
     // **Feature: vpn-pure-mode**
     // **Validates: Requirements 6.2, 6.3 - WebRTC 阻断**
     // 阻断 STUN/TURN 端口和 WebRTC 相关域名，防止浏览器通过 WebRTC 泄露真实 IP
+    // 注意：使用精确域名匹配（domain）而非后缀匹配（domain_suffix），避免误伤正常服务
     if options.block_webrtc {
         // 阻断 STUN/TURN 端口 (3478, 5349, 19302)
         let webrtc_ports = get_webrtc_ports();
         route_rules.push(json!({ "port": webrtc_ports, "network": "udp", "action": "reject" }));
         info!("WebRTC blocking enabled: blocking UDP ports {:?}", webrtc_ports);
         
-        // 阻断 WebRTC 相关域名
+        // 阻断 WebRTC 相关域名 - 使用精确匹配（domain）而非后缀匹配（domain_suffix）
         let webrtc_domains = get_webrtc_domains();
-        route_rules.push(json!({ "domain_suffix": webrtc_domains, "action": "reject" }));
-        info!("WebRTC blocking: blocking {} domains", webrtc_domains.len());
+        route_rules.push(json!({ "domain": webrtc_domains, "action": "reject" }));
+        info!("WebRTC blocking: blocking {} STUN/TURN domains", webrtc_domains.len());
     }
     
     // **Feature: vpn-pure-mode**

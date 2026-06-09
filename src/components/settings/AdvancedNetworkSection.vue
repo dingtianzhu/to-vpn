@@ -49,7 +49,7 @@ const texts = computed(() => ({
   downMbps: locale.value === 'zh' ? '下行带宽限制' : 'Download Bandwidth',
   downMbpsDesc: locale.value === 'zh' ? '限制下载速度，0 表示不限制' : 'Limit download speed, 0 means unlimited',
   blockQuic: locale.value === 'zh' ? '阻断 QUIC' : 'Block QUIC',
-  blockQuicDesc: locale.value === 'zh' ? '阻断 UDP 443 端口，强制浏览器使用 TCP，避免 HTTP/3 流量绕过代理' : 'Block UDP port 443, force browsers to use TCP, prevent HTTP/3 traffic bypass',
+  blockQuicDesc: locale.value === 'zh' ? '阻断 UDP 443 端口，强制使用 TCP。如遇 Google 等网站加载异常，可尝试关闭' : 'Block UDP 443, force TCP. If Google sites load slowly, try disabling this',
   disableIpv6: locale.value === 'zh' ? '禁用 IPv6' : 'Disable IPv6',
   disableIpv6Desc: locale.value === 'zh' ? 'TUN 模式下只配置 IPv4 地址，防止 IPv6 泄漏真实位置' : 'Only configure IPv4 in TUN mode to prevent IPv6 location leaks',
   tunStack: locale.value === 'zh' ? 'TUN 网络栈' : 'TUN Stack',
@@ -61,6 +61,7 @@ const texts = computed(() => ({
   defaultUp: locale.value === 'zh' ? '默认: 500' : 'Default: 500',
   defaultDown: locale.value === 'zh' ? '默认: 1000' : 'Default: 1000',
   defaultOn: locale.value === 'zh' ? '默认: 开' : 'Default: On',
+  defaultOff: locale.value === 'zh' ? '默认: 关' : 'Default: Off',
   defaultGvisor: locale.value === 'zh' ? '默认: gVisor' : 'Default: gVisor',
 }))
 
@@ -264,7 +265,7 @@ async function resetAdvancedSettings() {
       <!-- **Feature: vpn-pure-mode** -->
       <!-- **Validates: Requirements 10.2, 10.3** -->
       <SettingRow :icon="icons.quic" icon-color="text-red-500" icon-bg="bg-red-500/10"
-        :title="texts.blockQuic" :subtitle="texts.blockQuicDesc" :default-value="texts.defaultOn" :requires-reconnect="true">
+        :title="texts.blockQuic" :subtitle="texts.blockQuicDesc" :default-value="texts.defaultOff" :requires-reconnect="true">
         <SettingSwitch :model-value="settings.blockQuic" @update:model-value="toggleBlockQuic" />
       </SettingRow>
 

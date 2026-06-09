@@ -15,11 +15,15 @@ pub struct DnsLeakTestResult {
 
 /// 通过VPN代理检测DNS泄漏
 #[tauri::command]
-pub async fn check_dns_leak(use_proxy: bool) -> Result<DnsLeakTestResult, String> {
+pub async fn check_dns_leak(
+    state: tauri::State<'_, crate::vpn::state::VpnState>,
+    use_proxy: bool,
+) -> Result<DnsLeakTestResult, String> {
     info!("Starting DNS leak test (proxy: {})", use_proxy);
 
     let client = if use_proxy {
-        let proxy = Proxy::all("socks5://127.0.0.1:1080")
+        let socks_port = state.socks_port.load(std::sync::atomic::Ordering::SeqCst);
+        let proxy = Proxy::all(format!("socks5://127.0.0.1:{}", socks_port))
             .map_err(|e| format!("Proxy error: {}", e))?;
         
         reqwest::Client::builder()

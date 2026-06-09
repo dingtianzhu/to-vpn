@@ -65,7 +65,7 @@ async fn get_latency_via_api(port: u16) -> Option<i32> {
     );
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
+        .timeout(std::time::Duration::from_secs(6))
         .build()
         .ok()?;
 

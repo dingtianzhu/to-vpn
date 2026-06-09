@@ -78,13 +78,78 @@ fn is_kill_switch_enabled() -> bool {
     KillSwitch::is_enabled()
 }
 
+/// Tauri 命令：获取安全凭证
+#[tauri::command]
+fn get_secure_item(app_handle: tauri::AppHandle, key: String) -> Result<String, String> {
+    let app_dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let store_path = app_dir.join(".credentials.json");
+    if !store_path.exists() {
+        return Ok("".to_string());
+    }
+    let content = std::fs::read_to_string(&store_path).map_err(|e| e.to_string())?;
+    let map: std::collections::HashMap<String, String> = serde_json::from_str(&content).unwrap_or_default();
+    Ok(map.get(&key).cloned().unwrap_or_default())
+}
+
+/// Tauri 命令：设置安全凭证
+#[tauri::command]
+fn set_secure_item(app_handle: tauri::AppHandle, key: String, value: String) -> Result<(), String> {
+    let app_dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    if !app_dir.exists() {
+        std::fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
+    }
+    let store_path = app_dir.join(".credentials.json");
+    let mut map: std::collections::HashMap<String, String> = if store_path.exists() {
+        let content = std::fs::read_to_string(&store_path).map_err(|e| e.to_string())?;
+        serde_json::from_str(&content).unwrap_or_default()
+    } else {
+        std::collections::HashMap::new()
+    };
+    map.insert(key, value);
+    let serialized = serde_json::to_string(&map).map_err(|e| e.to_string())?;
+    std::fs::write(&store_path, serialized).map_err(|e| e.to_string())?;
+    
+    // 设置安全权限 (0o600)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = std::fs::metadata(&store_path) {
+            let mut perms = metadata.permissions();
+            perms.set_mode(0o600);
+            let _ = std::fs::set_permissions(&store_path, perms);
+        }
+    }
+    
+    Ok(())
+}
+
+/// Tauri 命令：删除安全凭证
+#[tauri::command]
+fn delete_secure_item(app_handle: tauri::AppHandle, key: String) -> Result<(), String> {
+    let app_dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let store_path = app_dir.join(".credentials.json");
+    if !store_path.exists() {
+        return Ok(());
+    }
+    let content = std::fs::read_to_string(&store_path).map_err(|e| e.to_string())?;
+    let mut map: std::collections::HashMap<String, String> = serde_json::from_str(&content).unwrap_or_default();
+    if map.remove(&key).is_some() {
+        let serialized = serde_json::to_string(&map).map_err(|e| e.to_string())?;
+        std::fs::write(&store_path, serialized).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     logging::init();
     tracing::info!("Performing startup cleanup...");
-    platform::force_cleanup();
-    // 清除所有系统代理（SOCKS + HTTP），防止异常退出后代理残留
-    vpn::proxy::set_system_proxy(false);
+    
+    // 启动时强制清理残留状态，防止异常退出后断网
+    // **Feature: vpn-pure-mode**
+    // **Validates: Requirements - 启动时恢复网络状态**
+    startup_cleanup();
+    
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init()) // 必须添加这一行
@@ -125,6 +190,10 @@ pub fn run() {
             enable_kill_switch,
             disable_kill_switch,
             is_kill_switch_enabled,
+            // 🔧 新增: 安全存储 (Keychain)
+            get_secure_item,
+            set_secure_item,
+            delete_secure_item,
             // 托盘功能
             tray::hide_tray_popup,
             tray::show_main_window,
@@ -174,14 +243,69 @@ fn cleanup_on_exit(app_handle: &tauri::AppHandle) {
     KillSwitch::force_cleanup();
     
     platform::force_cleanup();
+
+    let mut socks_port = constants::DEFAULT_SOCKS_PORT;
+    let mut http_port = constants::DEFAULT_HTTP_PORT;
+
+    if let Some(state) = app_handle.try_state::<VpnState>() {
+        socks_port = state.socks_port.load(std::sync::atomic::Ordering::SeqCst);
+        http_port = state.http_port.load(std::sync::atomic::Ordering::SeqCst);
+        state.reset();
+    }
+
     // 清除所有系统代理（SOCKS + HTTP）
-    vpn::proxy::set_system_proxy(false);
+    vpn::proxy::set_system_proxy(false, socks_port, http_port);
     
     // 恢复网络状态（DNS、路由、IPv6）
     #[cfg(target_os = "macos")]
     platform::restore_network_state();
 
-    if let Some(state) = app_handle.try_state::<VpnState>() {
-        state.reset();
+    #[cfg(target_os = "windows")]
+    platform::restore_network_state_windows();
+}
+
+/// 启动时清理残留状态
+/// 
+/// 防止异常退出（如突然关机、崩溃）后导致网络问题
+/// 
+/// **Feature: vpn-pure-mode**
+/// **Validates: Requirements - 启动时恢复网络状态**
+fn startup_cleanup() {
+    tracing::info!("Checking for residual VPN state from previous session...");
+    
+    // 1. 清理 Kill Switch 残留（如果有状态文件说明上次异常退出）
+    if KillSwitch::check_state() {
+        tracing::warn!("Found residual Kill Switch state, cleaning up...");
+        KillSwitch::force_cleanup();
     }
+    
+    // 2. 强制清理 sing-box 进程和相关资源
+    platform::force_cleanup();
+    
+    // 3. 清除系统代理设置
+    tracing::info!("Clearing system proxy settings...");
+    vpn::proxy::set_system_proxy(false, constants::DEFAULT_SOCKS_PORT, constants::DEFAULT_HTTP_PORT);
+    
+    // 4. 恢复网络状态（macOS 特有）
+    #[cfg(target_os = "macos")]
+    {
+        tracing::info!("Restoring network state on macOS...");
+        platform::restore_network_state();
+    }
+    
+    // 5. Windows 特有清理
+    #[cfg(target_os = "windows")]
+    {
+        tracing::info!("Restoring network state on Windows...");
+        platform::restore_network_state_windows();
+    }
+    
+    // 6. Linux 特有清理
+    #[cfg(target_os = "linux")]
+    {
+        tracing::info!("Restoring network state on Linux...");
+        platform::restore_network_state_linux();
+    }
+    
+    tracing::info!("Startup cleanup completed");
 }

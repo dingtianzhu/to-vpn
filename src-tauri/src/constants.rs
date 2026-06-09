@@ -49,8 +49,8 @@ pub const PORT_CHECK_TIMEOUT_MS: u64 = 100;
 
 /// DNS 服务器配置
 pub mod dns {
-    pub const GOOGLE_DOH: &str = "https://dns.google/dns-query";
-    pub const CLOUDFLARE_DOH: &str = "https://cloudflare-dns.com/dns-query";
+    pub const GOOGLE_DOH: &str = "https://8.8.8.8/dns-query";
+    pub const CLOUDFLARE_DOH: &str = "https://1.1.1.1/dns-query";
     pub const ALIYUN_UDP: &str = "223.5.5.5";
     pub const QUAD9_UDP: &str = "9.9.9.9";
 }

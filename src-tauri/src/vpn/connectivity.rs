@@ -4,8 +4,6 @@ use serde::Serialize;
 use std::time::Duration;
 use tracing::{info, warn};
 
-use crate::constants::DEFAULT_SOCKS_PORT;
-
 /// 连通性测试结果
 #[derive(Debug, Clone, Serialize)]
 pub struct ConnectivityResult {
@@ -20,22 +18,26 @@ pub struct ConnectivityResult {
 /// TUN 模式：直接测试（流量自动通过 TUN 接口）
 /// SOCKS 模式：通过 SOCKS 代理测试
 #[tauri::command]
-pub async fn test_connectivity(use_proxy: bool) -> ConnectivityResult {
+pub async fn test_connectivity(
+    state: tauri::State<'_, crate::vpn::state::VpnState>,
+    use_proxy: bool,
+) -> Result<ConnectivityResult, String> {
     let test_url = "http://www.gstatic.com/generate_204";
+    let socks_port = state.socks_port.load(std::sync::atomic::Ordering::SeqCst);
 
     info!(use_proxy = use_proxy, "Testing connectivity");
 
     let client_result = if use_proxy {
-        let proxy = match reqwest::Proxy::all(format!("socks5://127.0.0.1:{}", DEFAULT_SOCKS_PORT))
+        let proxy = match reqwest::Proxy::all(format!("socks5://127.0.0.1:{}", socks_port))
         {
             Ok(p) => p,
             Err(e) => {
-                return ConnectivityResult {
+                return Ok(ConnectivityResult {
                     success: false,
                     latency_ms: None,
                     error: Some(format!("Invalid proxy config: {}", e)),
                     test_url: test_url.to_string(),
-                };
+                });
             }
         };
 
@@ -54,12 +56,12 @@ pub async fn test_connectivity(use_proxy: bool) -> ConnectivityResult {
         Ok(c) => c,
         Err(e) => {
             warn!("Failed to create HTTP client: {}", e);
-            return ConnectivityResult {
+            return Ok(ConnectivityResult {
                 success: false,
                 latency_ms: None,
                 error: Some(format!("Failed to create client: {}", e)),
                 test_url: test_url.to_string(),
-            };
+            });
         }
     };
 
@@ -73,31 +75,31 @@ pub async fn test_connectivity(use_proxy: bool) -> ConnectivityResult {
             // 204 No Content 或 200 OK 都表示成功
             if status.is_success() || status.as_u16() == 204 {
                 info!(latency_ms = latency, "Connectivity test passed");
-                ConnectivityResult {
+                Ok(ConnectivityResult {
                     success: true,
                     latency_ms: Some(latency),
                     error: None,
                     test_url: test_url.to_string(),
-                }
+                })
             } else {
                 warn!(status = %status, "Connectivity test failed with status");
-                ConnectivityResult {
+                Ok(ConnectivityResult {
                     success: false,
                     latency_ms: Some(latency),
                     error: Some(format!("HTTP status: {}", status)),
                     test_url: test_url.to_string(),
-                }
+                })
             }
         }
         Err(e) => {
             let latency = start.elapsed().as_millis() as u64;
             warn!(error = %e, "Connectivity test failed");
-            ConnectivityResult {
+            Ok(ConnectivityResult {
                 success: false,
                 latency_ms: if latency > 0 { Some(latency) } else { None },
                 error: Some(e.to_string()),
                 test_url: test_url.to_string(),
-            }
+            })
         }
     }
 }
@@ -107,16 +109,20 @@ pub async fn test_connectivity(use_proxy: bool) -> ConnectivityResult {
 /// 通过 SOCKS 代理获取当前的公网 IP
 /// **Feature: vpn-pure-mode**
 #[tauri::command]
-pub async fn get_public_ip(use_proxy: bool) -> Result<String, String> {
+pub async fn get_public_ip(
+    state: tauri::State<'_, crate::vpn::state::VpnState>,
+    use_proxy: bool,
+) -> Result<String, String> {
     // 使用多个 IP 查询服务作为备选
     let ip_services = [
         "https://api.ipify.org",
         "https://icanhazip.com",
         "https://ifconfig.me/ip",
     ];
+    let socks_port = state.socks_port.load(std::sync::atomic::Ordering::SeqCst);
 
     let client_result = if use_proxy {
-        let proxy = reqwest::Proxy::all(format!("socks5://127.0.0.1:{}", DEFAULT_SOCKS_PORT))
+        let proxy = reqwest::Proxy::all(format!("socks5://127.0.0.1:{}", socks_port))
             .map_err(|e| format!("Invalid proxy config: {}", e))?;
 
         reqwest::Client::builder()

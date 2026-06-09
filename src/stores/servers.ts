@@ -145,8 +145,15 @@ export const useServersStore = defineStore("servers", () => {
       const receivedNodes = new Set<number>();
 
       // 检查 VPN 连接状态，决定使用哪种测试方式
-      const vpnStore = useVpnStore();
-      const useProxy = vpnStore.isConnected;
+      // 优先从 Rust 后端查询真实状态，防止前端 Store 初始化滞后导致判定错误
+      let useProxy = false;
+      try {
+        const vpnStatus = await invoke<{ status: string }>("check_vpn_status");
+        useProxy = vpnStatus.status === "connected";
+      } catch (e) {
+        const vpnStore = useVpnStore();
+        useProxy = vpnStore.isConnected;
+      }
       console.log(`[Ping] Using ${useProxy ? 'proxy' : 'direct'} mode for latency test`);
 
       // 设置监听器接收 ping 结果（在调用 ping_nodes 之前）
@@ -171,10 +178,11 @@ export const useServersStore = defineStore("servers", () => {
         if (serverIndex !== -1) {
           // 创建新数组以触发响应式更新
           const newServers = [...servers.value];
+          const targetStatus = status === "slow" ? "online" : status;
           newServers[serverIndex] = {
             ...newServers[serverIndex],
             ping: latency_ms >= 0 ? latency_ms : 999,
-            status: isValidServerStatus(status) ? status : "offline",
+            status: isValidServerStatus(targetStatus) ? targetStatus : "offline",
           };
           servers.value = newServers;
 

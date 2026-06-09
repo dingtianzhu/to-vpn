@@ -47,8 +47,8 @@ const texts = computed(() => ({
     : 'Ensure DNS queries go through VPN tunnel to prevent location leaks',
   blockWebRTC: locale.value === 'zh' ? 'WebRTC 阻断' : 'Block WebRTC',
   blockWebRTCDesc: locale.value === 'zh' 
-    ? '阻断 STUN/TURN 端口和 WebRTC 域名，防止浏览器泄露真实 IP' 
-    : 'Block STUN/TURN ports and WebRTC domains to prevent browser IP leaks',
+    ? '阻断 STUN/TURN 端口，防止浏览器泄露真实 IP。如遇视频通话问题，可尝试关闭' 
+    : 'Block STUN/TURN ports to prevent IP leaks. If video calls fail, try disabling this',
   resetToDefaults: locale.value === 'zh' ? '重置为默认' : 'Reset to Defaults',
   enableSuccess: locale.value === 'zh' ? 'Kill Switch 已启用' : 'Kill Switch enabled',
   disableSuccess: locale.value === 'zh' ? 'Kill Switch 已禁用' : 'Kill Switch disabled',
@@ -228,7 +228,7 @@ watch(status, async (newStatus: string, oldStatus: string) => {
         icon-bg="bg-purple-500/10"
         :title="texts.blockWebRTC" 
         :subtitle="texts.blockWebRTCDesc"
-        :default-value="texts.defaultOn"
+        :default-value="texts.defaultOff"
         :requires-reconnect="true"
       >
         <SettingSwitch 

@@ -24,7 +24,7 @@ pub const PORT_MAX: u16 = 65535;
 /// * `Ok(())` if the port is valid
 /// * `Err(VpnError::Config)` if the port is out of range
 pub fn validate_port_range(port: u16) -> Result<()> {
-    if port < PORT_MIN || port > PORT_MAX {
+    if !(PORT_MIN..=PORT_MAX).contains(&port) {
         return Err(VpnError::Config(format!(
             "Port {} is out of valid range ({}-{})",
             port, PORT_MIN, PORT_MAX

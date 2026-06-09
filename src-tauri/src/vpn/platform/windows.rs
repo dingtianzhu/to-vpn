@@ -6,10 +6,21 @@ use std::net::TcpStream;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+// 辅助函数：创建隐藏黑窗口的命令行子进程
+fn new_command(program: &str) -> Command {
+    let mut cmd = Command::new(program);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    cmd
+}
+
 pub fn is_singbox_running() -> bool {
     if let Ok(pid_str) = fs::read_to_string(get_singbox_pid_file()) {
         if let Ok(pid) = pid_str.trim().parse::<u32>() {
-            if let Ok(output) = Command::new("tasklist")
+            if let Ok(output) = new_command("tasklist")
                 .args(["/FI", &format!("PID eq {}", pid), "/NH"])
                 .output()
             {
@@ -21,7 +32,7 @@ pub fn is_singbox_running() -> bool {
         }
     }
 
-    Command::new("tasklist")
+    new_command("tasklist")
         .args(["/FI", "IMAGENAME eq sing-box.exe", "/NH"])
         .output()
         .map(|o| {
@@ -36,7 +47,7 @@ pub fn check_singbox_installed() -> bool {
 }
 
 fn is_admin() -> bool {
-    Command::new("net")
+    new_command("net")
         .args(["session"])
         .output()
         .map(|o| o.status.success())
@@ -63,7 +74,7 @@ pub fn run_singbox_tun_as_root(config_path: &str, _log_file: &str) -> Result<(),
         escaped_config
     );
 
-    let output = Command::new("powershell")
+    let output = new_command("powershell")
         .args(["-Command", &ps_command])
         .output();
 
@@ -86,9 +97,17 @@ pub fn run_singbox_tun_as_root(config_path: &str, _log_file: &str) -> Result<(),
 }
 
 pub fn stop_singbox_tun_as_root() -> Result<(), String> {
-    let _ = Command::new("taskkill")
-        .args(["/F", "/IM", "sing-box.exe"])
-        .output();
+    if is_admin() {
+        let _ = new_command("taskkill")
+            .args(["/F", "/IM", "sing-box.exe"])
+            .output();
+    } else {
+        // 如果不是管理员，需要通过 powershell 提升权限执行 taskkill
+        let ps_command = "Start-Process -FilePath 'taskkill' -ArgumentList '/F','/IM','sing-box.exe' -Verb RunAs -WindowStyle Hidden";
+        let _ = new_command("powershell")
+            .args(["-Command", ps_command])
+            .output();
+    }
     let _ = fs::remove_file(get_singbox_pid_file());
     std::thread::sleep(Duration::from_millis(500));
     Ok(())
@@ -96,15 +115,22 @@ pub fn stop_singbox_tun_as_root() -> Result<(), String> {
 
 pub fn force_cleanup() {
     let _ = stop_singbox_tun_as_root();
-    let _ = Command::new("taskkill")
-        .args(["/F", "/T", "/IM", "sing-box.exe"])
-        .output();
+    if is_admin() {
+        let _ = new_command("taskkill")
+            .args(["/F", "/T", "/IM", "sing-box.exe"])
+            .output();
+    } else {
+        let ps_command = "Start-Process -FilePath 'taskkill' -ArgumentList '/F','/T','/IM','sing-box.exe' -Verb RunAs -WindowStyle Hidden";
+        let _ = new_command("powershell")
+            .args(["-Command", ps_command])
+            .output();
+    }
 }
 
-pub fn set_system_socks_proxy(enable: bool) {
+pub fn set_system_socks_proxy(enable: bool, port: u16) {
     let reg_path = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
     if enable {
-        let _ = Command::new("reg")
+        let _ = new_command("reg")
             .args([
                 "add",
                 reg_path,
@@ -117,7 +143,8 @@ pub fn set_system_socks_proxy(enable: bool) {
                 "/f",
             ])
             .output();
-        let _ = Command::new("reg")
+        let socks_val = format!("socks=127.0.0.1:{}", port);
+        let _ = new_command("reg")
             .args([
                 "add",
                 reg_path,
@@ -126,12 +153,12 @@ pub fn set_system_socks_proxy(enable: bool) {
                 "/t",
                 "REG_SZ",
                 "/d",
-                "socks=127.0.0.1:1080",
+                &socks_val,
                 "/f",
             ])
             .output();
     } else {
-        let _ = Command::new("reg")
+        let _ = new_command("reg")
             .args([
                 "add",
                 reg_path,
@@ -145,7 +172,7 @@ pub fn set_system_socks_proxy(enable: bool) {
             ])
             .output();
     }
-    let _ = Command::new("netsh")
+    let _ = new_command("netsh")
         .args(["winhttp", "reset", "proxy"])
         .output();
 }
@@ -154,11 +181,12 @@ pub fn set_system_socks_proxy(enable: bool) {
 /// 
 /// **Feature: vpn-enhancement**
 /// **Validates: Requirements 1.2, 1.4**
-pub fn set_system_http_proxy(enable: bool) {
+pub fn set_system_http_proxy(enable: bool, port: u16) {
     let reg_path = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
     if enable {
         // Windows 使用统一的代理服务器设置，包含 HTTP 和 HTTPS
-        let _ = Command::new("reg")
+        let proxy_val = format!("http=127.0.0.1:{};https=127.0.0.1:{}", port, port);
+        let _ = new_command("reg")
             .args([
                 "add",
                 reg_path,
@@ -167,7 +195,7 @@ pub fn set_system_http_proxy(enable: bool) {
                 "/t",
                 "REG_SZ",
                 "/d",
-                "http=127.0.0.1:1087;https=127.0.0.1:1087;socks=127.0.0.1:1080",
+                &proxy_val,
                 "/f",
             ])
             .output();
@@ -179,10 +207,10 @@ pub fn set_system_http_proxy(enable: bool) {
 /// 
 /// **Feature: vpn-enhancement**
 /// **Validates: Requirements 1.2, 1.4 - 同时设置/清除 SOCKS 和 HTTP 代理**
-pub fn set_system_proxy(enable: bool) {
+pub fn set_system_proxy(enable: bool, socks_port: u16, http_port: u16) {
     if enable {
         let reg_path = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
-        let _ = Command::new("reg")
+        let _ = new_command("reg")
             .args([
                 "add",
                 reg_path,
@@ -196,7 +224,8 @@ pub fn set_system_proxy(enable: bool) {
             ])
             .output();
         // 设置包含 SOCKS 和 HTTP 的代理服务器
-        let _ = Command::new("reg")
+        let proxy_val = format!("http=127.0.0.1:{};https=127.0.0.1:{};socks=127.0.0.1:{}", http_port, http_port, socks_port);
+        let _ = new_command("reg")
             .args([
                 "add",
                 reg_path,
@@ -205,15 +234,46 @@ pub fn set_system_proxy(enable: bool) {
                 "/t",
                 "REG_SZ",
                 "/d",
-                "http=127.0.0.1:1087;https=127.0.0.1:1087;socks=127.0.0.1:1080",
+                &proxy_val,
                 "/f",
             ])
             .output();
     } else {
-        set_system_socks_proxy(false);
+        set_system_socks_proxy(false, socks_port);
     }
 }
 
 pub fn detect_default_interface() -> Option<String> {
     None
+}
+
+/// 恢复 Windows 网络状态
+/// 
+/// 在应用启动时调用，清理可能残留的代理和网络设置
+/// 
+/// **Feature: vpn-pure-mode**
+/// **Validates: Requirements - 启动时恢复网络状态**
+pub fn restore_network_state_windows() {
+    println!(">>> Restoring Windows network state...");
+    
+    // 1. 禁用系统代理
+    set_system_proxy(false, crate::constants::DEFAULT_SOCKS_PORT, crate::constants::DEFAULT_HTTP_PORT);
+    
+    // 2. 重置 WinHTTP 代理
+    let _ = new_command("netsh")
+        .args(["winhttp", "reset", "proxy"])
+        .output();
+    
+    // 3. 刷新 DNS 缓存
+    let _ = new_command("ipconfig")
+        .args(["/flushdns"])
+        .output();
+    
+    // 4. 重置 Winsock（如果有严重网络问题）
+    // 注意：这个命令需要管理员权限，可能会失败
+    // let _ = new_command("netsh")
+    //     .args(["winsock", "reset"])
+    //     .output();
+    
+    println!(">>> Windows network state restored");
 }

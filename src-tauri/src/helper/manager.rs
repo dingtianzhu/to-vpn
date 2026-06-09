@@ -155,8 +155,11 @@ chown root:wheel "{target_bin}"
 chmod 755 "{target_bin}"
 cat > "{sudoers}" << 'EOF'
 Cmnd_Alias TOVPN_SINGBOX = {target_bin_escaped} *
-Cmnd_Alias TOVPN_KILL = /usr/bin/pkill *, /bin/kill *
-%admin ALL=(root) NOPASSWD: TOVPN_SINGBOX, TOVPN_KILL
+Cmnd_Alias TOVPN_KILL = /usr/bin/pkill -9 -x sing-box, /usr/bin/pkill -x sing-box, /bin/kill -9 [0-9]*, /bin/kill [0-9]*
+Cmnd_Alias TOVPN_PF = /sbin/pfctl -f *, /sbin/pfctl -e, /sbin/pfctl -F all, /sbin/pfctl -d
+Cmnd_Alias TOVPN_ROUTE = /sbin/route *
+Cmnd_Alias TOVPN_PROXY = /usr/sbin/networksetup *
+%admin ALL=(root) NOPASSWD: TOVPN_SINGBOX, TOVPN_KILL, TOVPN_PF, TOVPN_ROUTE, TOVPN_PROXY
 EOF
 chmod 440 "{sudoers}"
 chown root:wheel "{sudoers}"
