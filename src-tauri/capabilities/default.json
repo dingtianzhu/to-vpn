@@ -34,6 +34,9 @@
       "allow": [
         {
           "url": "http://182.92.114.35:8080/*"
+        },
+        {
+          "url": "https://api.tovpn-service.com/*"
         }
       ]
     }
