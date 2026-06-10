@@ -35,6 +35,9 @@ pub fn generate_with_options(
 ) -> Result<Value> {
     info!(">>> Generating TUN config (Dual Stack) with options: {:?} <<<", options);
 
+    // 动态检测活动网络接口，用于后续绑定及确定严格路由策略
+    let active_interface = detect_active_interface();
+
     // 1. 基础参数
     let mtu = if config.mtu > 0 && config.mtu <= MTU_MAX {
         config.mtu
@@ -84,7 +87,7 @@ pub fn generate_with_options(
     #[cfg(not(target_os = "macos"))]
     let auto_route = true;
     #[cfg(not(target_os = "macos"))]
-    let strict_route = true;
+    let strict_route = active_interface.is_some(); // 如果未检测到活动物理网卡（如 Windows 下），为防止直连出站形成环路，将 strict_route 设为 false
     #[cfg(not(target_os = "macos"))]
     let final_stack = tun_stack;
     
@@ -337,7 +340,7 @@ pub fn generate_with_options(
     // 动态检测网络接口，如果检测失败则依赖 auto_detect_interface
     // **Feature: vpn-optimization, Property 2 & 3**
     // **Validates: Requirements 1.3, 6.2, 6.3**
-    let direct_ob = match detect_active_interface() {
+    let direct_ob = match active_interface {
         Some(interface_info) => {
             info!("Detected active interface: {} (type: {:?})", interface_info.name, interface_info.interface_type);
             json!({
