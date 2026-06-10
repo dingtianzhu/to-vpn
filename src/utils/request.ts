@@ -237,7 +237,10 @@ export async function request<T>(config: AxiosRequestConfig & { _retry?: boolean
     if (error.name === "AbortError") {
       throw new Error("Request timeout");
     }
-    throw error;
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error(String(error));
   }
 }
 
