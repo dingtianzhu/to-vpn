@@ -6,16 +6,17 @@ import { secureGet, secureSet, SECURE_KEYS } from "./secureStorage";
 const baseURL =
   import.meta.env.VITE_API_BASE_URL || "http://182.92.114.35:8080/api/v1";
 
-// 标记是否在 Tauri 环境中运行
-const isTauri =
-  typeof window !== "undefined" &&
-  ((window as any).__TAURI_IPC__ !== undefined ||
-    (window as any).__TAURI_INTERNALS__ !== undefined ||
-    (window as any).__TAURI__ !== undefined);
+// 动态获取网络请求函数，规避生命周期早期 window 尚未注入 Tauri API 导致的检测错误
+function getRequestFetch() {
+  const isTauri =
+    typeof window !== "undefined" &&
+    ((window as any).__TAURI_IPC__ !== undefined ||
+      (window as any).__TAURI_INTERNALS__ !== undefined ||
+      (window as any).__TAURI__ !== undefined);
 
-console.log("[Request] Environment check: isTauri =", isTauri);
-
-const requestFetch = isTauri ? tauriFetch : fetch;
+  console.log("[Request] Dynamic environment check: isTauri =", isTauri);
+  return isTauri ? tauriFetch : fetch;
+}
 
 // Token 刷新状态
 let isRefreshing = false;
@@ -71,7 +72,7 @@ export async function refreshAccessToken(): Promise<string | null> {
   }
 
   try {
-    const response = await requestFetch(`${baseURL}/auth/refresh`, {
+    const response = await getRequestFetch()(`${baseURL}/auth/refresh`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -213,7 +214,7 @@ export async function request<T>(config: AxiosRequestConfig & { _retry?: boolean
   // 5. 执行请求
   const method = (config.method || "GET").toUpperCase();
   try {
-    const response = await requestFetch(url, {
+    const response = await getRequestFetch()(url, {
       method,
       headers,
       body,
