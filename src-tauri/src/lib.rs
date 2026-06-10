@@ -142,6 +142,7 @@ fn delete_secure_item(app_handle: tauri::AppHandle, key: String) -> Result<(), S
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Force recompile to apply capabilities default.json changes
     logging::init();
     tracing::info!("Performing startup cleanup...");
     
