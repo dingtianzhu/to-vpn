@@ -4,10 +4,17 @@ import { secureGet, secureSet, SECURE_KEYS } from "./secureStorage";
 
 // 使用环境变量
 const baseURL =
-  import.meta.env.VITE_API_BASE_URL || "https://api.tovpn-service.com/api/v1";
+  import.meta.env.VITE_API_BASE_URL || "http://182.92.114.35:8080/api/v1";
 
 // 标记是否在 Tauri 环境中运行
-const isTauri = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__ !== undefined;
+const isTauri =
+  typeof window !== "undefined" &&
+  ((window as any).__TAURI_IPC__ !== undefined ||
+    (window as any).__TAURI_INTERNALS__ !== undefined ||
+    (window as any).__TAURI__ !== undefined);
+
+console.log("[Request] Environment check: isTauri =", isTauri);
+
 const requestFetch = isTauri ? tauriFetch : fetch;
 
 // Token 刷新状态
