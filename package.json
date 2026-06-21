@@ -29,6 +29,8 @@
     "@types/node": "^20.11.30",
     "@vitejs/plugin-vue": "^5.0.4",
     "autoprefixer": "^10.4.19",
+    "baseline-browser-mapping": "^2.10.35",
+    "caniuse-lite": "^1.0.30001797",
     "fast-check": "^4.4.0",
     "jsdom": "^27.3.0",
     "postcss": "^8.4.38",

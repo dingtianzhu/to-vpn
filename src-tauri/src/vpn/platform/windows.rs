@@ -1,10 +1,9 @@
 //! Windows 平台特定实现
 use super::TunPrecheck;
-use crate::constants::{get_singbox_pid_file, SINGBOX_API_PORT_TUN};
+use crate::constants::get_singbox_pid_file;
 use std::fs;
-use std::net::TcpStream;
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 // 辅助函数：创建隐藏黑窗口的命令行子进程
 fn new_command(program: &str) -> Command {
@@ -181,6 +180,7 @@ pub fn set_system_socks_proxy(enable: bool, port: u16) {
 /// 
 /// **Feature: vpn-enhancement**
 /// **Validates: Requirements 1.2, 1.4**
+#[allow(dead_code)]
 pub fn set_system_http_proxy(enable: bool, port: u16) {
     let reg_path = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
     if enable {
@@ -243,6 +243,7 @@ pub fn set_system_proxy(enable: bool, socks_port: u16, http_port: u16) {
     }
 }
 
+#[allow(dead_code)]
 pub fn detect_default_interface() -> Option<String> {
     None
 }

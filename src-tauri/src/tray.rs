@@ -69,6 +69,7 @@ fn ensure_tray_window<R: Runtime>(app: &tauri::AppHandle<R>) -> WebviewWindow<R>
     let width = 240.0;
     let height = 280.0;
 
+    #[allow(unused_mut)]
     let mut builder = tauri::WebviewWindowBuilder::new(
         app,
         "tray_popup",

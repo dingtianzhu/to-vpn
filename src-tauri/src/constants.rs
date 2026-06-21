@@ -22,6 +22,7 @@ pub fn get_singbox_pid_file() -> PathBuf {
 }
 
 /// TUN 模式标记文件 (用于辅助清理)
+#[allow(dead_code)]
 pub fn get_tun_lock_file() -> PathBuf {
     get_cache_dir().join("tovpn-tun.lock")
 }

@@ -18,16 +18,16 @@ pub struct PingResult {
 /// ICMP Ping（使用系统 ping 命令）
 /// 这是最可靠的方式，因为 Hysteria2 使用 UDP/QUIC 协议
 fn icmp_ping(host: &str, timeout_ms: u64) -> i32 {
-    let timeout_sec = (timeout_ms / 1000).max(1);
+    let _timeout_sec = (timeout_ms / 1000).max(1);
     
     #[cfg(target_os = "macos")]
     let output = Command::new("ping")
-        .args(["-c", "1", "-t", &timeout_sec.to_string(), host])
+        .args(["-c", "1", "-t", &_timeout_sec.to_string(), host])
         .output();
     
     #[cfg(target_os = "linux")]
     let output = Command::new("ping")
-        .args(["-c", "1", "-W", &timeout_sec.to_string(), host])
+        .args(["-c", "1", "-W", &_timeout_sec.to_string(), host])
         .output();
     
     #[cfg(target_os = "windows")]

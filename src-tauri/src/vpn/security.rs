@@ -77,9 +77,10 @@ pub fn verify_config(config_path: &Path, sig_path: &Path) -> bool {
 }
 
 /// 设置严格的文件权限 (Unix: 600, Windows: 仅当前用户)
-pub fn set_secure_permissions(path: &Path) {
+pub fn set_secure_permissions(_path: &Path) {
     #[cfg(unix)]
     {
+        let path = _path;
         use std::os::unix::fs::PermissionsExt;
         let mut perms = fs::metadata(path).unwrap().permissions();
         perms.set_mode(0o600); // 仅所有者可读写

@@ -2,11 +2,15 @@
 //! 版本：v2025-12-22-Final-Clean-Build
 
 use std::fs;
+#[cfg(target_os = "macos")]
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
 use std::process::Command;
 use tauri::Manager;
 
-use tracing::{error, info};
+#[cfg(target_os = "macos")]
+use tracing::error;
+use tracing::info;
 
 use super::constants::get_helper_marker_path;
 #[cfg(target_os = "macos")]
